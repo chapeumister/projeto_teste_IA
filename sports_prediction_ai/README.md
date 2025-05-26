@@ -61,6 +61,16 @@ sports_prediction_ai/
       ```
       On Windows, use `set FOOTBALL_DATA_API_KEY="YOUR_API_TOKEN"` in Command Prompt or `$env:FOOTBALL_DATA_API_KEY="YOUR_API_TOKEN"` in PowerShell.
     - If the API key is not set, the data collection module will use a placeholder and will not fetch real data.
+    - (Optional) Set up API Key for API-SPORTS:
+      This project also supports `api-football.com` (API-SPORTS) as a data source.
+      - Register at [RapidAPI](https://rapidapi.com/api-sports/api/api-football) to subscribe to the API and get your key.
+      - Set the API token as an environment variable:
+        ```bash
+        export APISPORTS_API_KEY="YOUR_APISPORTS_API_KEY"
+        ```
+        (or equivalent for your OS).
+      - If not set, `get_matches_from_apisports` will print a warning and return no data.
+
 
 ## How to Run
 
@@ -80,7 +90,8 @@ python src/prediction_pipeline.py
 ```
 - Make sure `FOOTBALL_DATA_API_KEY` is set to get live match data.
 - The pipeline will use `random_forest_model.pkl` by default. You can modify `DEFAULT_MODEL_FILENAME` in the script to use another model.
-- **Important**: The current feature generation in `prediction_pipeline.py` is placeholder. For meaningful predictions, the features generated must match how the chosen model was actually trained.
+- **Important**: The feature generation in `prediction_pipeline.py` now includes team form features derived from historical data. For meaningful predictions with a custom-trained model, ensure the features generated align with your model's training.
+- The pipeline attempts to load historical data from `data/historical_matches_sample.csv`. If not found, it uses a small internal dummy dataset.
 
 ### 3. Use Jupyter Notebooks
 The `notebooks/` directory contains examples:
@@ -97,13 +108,14 @@ Then navigate to the `notebooks/` directory and open the `.ipynb` files.
 
 ### `src/data_collection.py`
 -   Handles fetching match data from external APIs.
--   Currently includes a function `get_matches_for_date` for `football-data.org`.
--   Requires the `FOOTBALL_DATA_API_KEY` environment variable for `football-data.org`.
+-   Includes `get_matches_for_date` for `football-data.org` (requires `FOOTBALL_DATA_API_KEY`).
+-   Includes `get_matches_from_apisports` for `api-football.com` (requires `APISPORTS_API_KEY`).
 
 ### `src/data_preprocessing.py`
 -   Responsible for cleaning raw API data and transforming it into a structured format (Pandas DataFrame).
--   Includes `preprocess_match_data` which performs initial parsing of match details.
--   **Note:** Advanced feature engineering (e.g., team form, head-to-head stats) is a complex part that would be expanded here. The current version provides a basic structure.
+-   `preprocess_match_data`: Performs initial parsing of match details.
+-   `engineer_form_features`: Calculates team form features (Wins, Draws, Losses for the last N games) based on historical match data. It expects a DataFrame of current matches and a DataFrame of historical matches.
+-   **Note:** The quality of form features heavily depends on the availability and quality of historical data.
 
 ### `src/model_training.py`
 -   Contains functions for training and saving machine learning models.
@@ -121,19 +133,26 @@ Then navigate to the `notebooks/` directory and open the `.ipynb` files.
 
 ### `src/prediction_pipeline.py`
 -   Integrates the other modules to provide an end-to-end prediction flow:
-    1.  Fetches matches for the current day (or a specified date).
-    2.  Preprocesses the match data.
-    3.  **Generates features for prediction**: Currently, this step (`generate_features_for_prediction`) creates *dummy features*. For a real-world application, this function must be updated to generate features consistent with those used during model training.
-    4.  Loads a pre-trained model from the `models/` directory.
-    5.  Makes predictions (outputs probabilities for home win, draw, away win).
-    6.  Displays the results.
+    1.  Fetches matches for the current day (or a specified date) using one of the integrated APIs.
+    2.  Preprocesses the raw match data.
+    3.  **Loads historical match data**: Attempts to load from `data/historical_matches_sample.csv`. If this file is not found or is invalid, it falls back to a minimal internal dummy dataset for demonstration purposes. For production use, a robust historical data source is essential.
+    4.  **Generates features for prediction**: This step now includes the calculation of team form features (W-D-L over last N games) using `engineer_form_features` from `data_preprocessing.py`. It also adds other placeholder features (`feature1`, `feature2`, `feature3`) to align with the example model training script.
+    5.  Loads a pre-trained model from the `models/` directory.
+    6.  Makes predictions (outputs probabilities for home win, draw, away win).
+    7.  Displays the results.
 -   Can be run directly: `python src/prediction_pipeline.py`.
 -   Requires a trained model to be present in the `models/` directory (e.g., by running `src/model_training.py` first).
+-   The `data/historical_matches_sample.csv` file provides a small, sample dataset of historical matches. It is used by `prediction_pipeline.py` to demonstrate form feature calculation. Users should replace or augment this with more comprehensive historical data for actual model training and better predictions.
+
+## Data Files
+
+-   **`data/historical_matches_sample.csv`**: A sample CSV file containing dummy historical match data. This file is used by `prediction_pipeline.py` and can be used in notebooks to demonstrate the calculation of team form features. It includes columns like `home_team_id`, `away_team_id`, `home_team_score`, `away_team_score`, and `utcDate`. For serious use, this should be replaced with a comprehensive and regularly updated historical dataset.
 
 ## Future Enhancements (Based on Research Document)
 
--   **Advanced Feature Engineering**: Implement calculation of historical statistics (form, H2H, player stats, etc.). This is crucial for model performance.
--   **Multiple Data Sources**: Integrate more APIs and data sources (e.g., `API-SPORTS`, `Sportmonks`, `Sportsipy` library) as outlined in the research.
+-   **Advanced Feature Engineering**: While basic form features are now included, further expansion (H2H, player stats, Elo ratings, etc.) is key.
+-   **Comprehensive Historical Data Management**: Replace `data/historical_matches_sample.csv` with a robust system for collecting, storing, and accessing historical match data (e.g., a database).
+-   **Multiple Data Sources**: Further leverage `API-SPORTS` and integrate other sources like `Sportmonks`, `Sportsipy`.
 -   **Model Tuning and Selection**: Implement hyperparameter tuning (e.g., GridSearchCV, RandomizedSearchCV) and more rigorous cross-validation strategies.
 -   **Ensemble Models**: Experiment with ensembling techniques (e.g., voting classifiers, stacking).
 -   **Time Series Models (LSTMs)**: Explore LSTMs for capturing sequential patterns if sufficient temporal data is available.

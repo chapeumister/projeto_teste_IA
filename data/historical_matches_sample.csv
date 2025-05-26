@@ -1,0 +1,25 @@
+match_id,utcDate,home_team_id,away_team_id,home_team_score,away_team_score,competition_id,competition_name
+101,2022-12-01T12:00:00Z,10,11,2,1,1,Sample League A
+102,2022-12-05T15:00:00Z,11,10,1,2,1,Sample League A
+103,2022-12-10T17:00:00Z,10,12,3,0,1,Sample League A
+104,2022-12-15T20:00:00Z,12,10,0,1,1,Sample League A
+105,2022-12-20T12:00:00Z,10,13,1,1,1,Sample League A
+106,2022-12-25T15:00:00Z,13,10,2,0,1,Sample League A
+107,2022-12-02T17:00:00Z,11,12,2,2,2,Sample League B
+108,2022-12-06T20:00:00Z,12,13,0,0,2,Sample League B
+109,2022-12-11T12:00:00Z,11,13,1,3,2,Sample League B
+110,2022-12-16T15:00:00Z,13,11,2,1,2,Sample League B
+111,2022-12-21T17:00:00Z,10,11,4,1,1,Sample League A
+112,2022-12-26T20:00:00Z,13,12,1,1,2,Sample League B
+201,2022-12-01T18:00:00Z,99,10,1,1,3,Cup Game
+202,2022-12-05T18:00:00Z,10,99,0,0,3,Cup Game
+301,2023-01-05T18:00:00Z,20,21,1,0,4,New League
+302,2023-01-06T18:00:00Z,21,22,2,2,4,New League
+303,2023-01-07T18:00:00Z,20,22,3,1,4,New League
+304,2023-01-10T18:00:00Z,25,26,0,0,5,Another League
+305,2023-01-11T18:00:00Z,26,27,1,2,5,Another League
+306,2023-01-12T18:00:00Z,25,27,2,0,5,Another League
+400,2023-01-15T12:00:00Z,10,20,1,0,1,Sample League A 
+401,2023-01-15T15:00:00Z,11,21,1,1,2,Sample League B
+402,2023-01-15T18:00:00Z,12,22,0,2,1,Sample League A
+403,2023-01-15T21:00:00Z,13,25,3,3,2,Sample League B

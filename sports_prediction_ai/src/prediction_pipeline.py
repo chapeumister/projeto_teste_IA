@@ -14,58 +14,47 @@ except ImportError:
     # This is common in simple scripts but less so in structured projects.
     print("Attempting relative imports for src modules...")
     from data_collection import get_matches_for_date
-    from data_preprocessing import preprocess_match_data
+    from data_preprocessing import preprocess_match_data, engineer_form_features # Updated import
     from model_training import load_model
 
 
 # Configuration
 DEFAULT_MODEL_FILENAME = "random_forest_model.pkl" # Example: use Random Forest by default
 FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY", "YOUR_API_TOKEN")
+HISTORICAL_DATA_CSV = os.path.join(os.path.dirname(__file__), '..', 'data', 'historical_matches_sample.csv')
 
 
-def generate_features_for_prediction(matches_df: pd.DataFrame):
+def generate_features_for_prediction(daily_matches_df: pd.DataFrame, historical_matches_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Simulates feature generation for prediction.
-    In a real system, this would involve fetching historical data for the teams involved
-    in `matches_df` and calculating features like recent form, head-to-head, etc.
-    For this example, we'll create dummy features.
+    Generates features for prediction, primarily by adding team form features.
 
     Args:
-        matches_df (pd.DataFrame): DataFrame of upcoming matches, possibly with basic info.
+        daily_matches_df (pd.DataFrame): DataFrame of upcoming matches, preprocessed by `preprocess_match_data`.
+                                         Must contain 'home_team_id', 'away_team_id', and 'utcDate'.
+        historical_matches_df (pd.DataFrame): DataFrame of past matches for form calculation.
 
     Returns:
-        pd.DataFrame: DataFrame with features ready for the model.
-                      Returns an empty DataFrame if input is empty.
+        pd.DataFrame: The daily_matches_df augmented with form features.
+                      Returns an empty DataFrame if input is empty or required columns are missing.
     """
-    if matches_df.empty:
+    if daily_matches_df.empty:
+        print("generate_features_for_prediction: daily_matches_df is empty. Returning empty DataFrame.")
         return pd.DataFrame()
 
-    # Placeholder: These features need to match what the model was trained on.
-    # For the dummy model in model_training.py, it was 'feature1', 'feature2', 'feature3'.
-    # Let's assume our real model was trained on features derived from match data.
-    # For this pipeline example, we'll generate some arbitrary features.
-    # In a real scenario, you'd use team names/IDs from matches_df to look up historical stats.
+    required_cols = ['home_team_id', 'away_team_id', 'utcDate']
+    if not all(col in daily_matches_df.columns for col in required_cols):
+        print(f"generate_features_for_prediction: daily_matches_df is missing one or more required columns: {required_cols}. Current columns: {daily_matches_df.columns.tolist()}")
+        # Return daily_matches_df as is, or an empty one, or add empty form columns for schema consistency
+        return daily_matches_df # Or pd.DataFrame() if strict failure is preferred
+
+    print(f"Generating form features for {len(daily_matches_df)} matches...")
+    matches_with_form = engineer_form_features(daily_matches_df, historical_matches_df, num_games=5)
     
-    features_for_prediction = pd.DataFrame(index=matches_df.index)
-    
-    # Example dummy features (these would be actual computed stats in reality)
-    # These names MUST match the feature names used during model training.
-    # Our dummy model used 'feature1', 'feature2', 'feature3'.
-    # Let's pretend we can derive these from match info.
-    features_for_prediction['feature1'] = matches_df.index * 0.5 # Example based on match index
-    features_for_prediction['feature2'] = 1.0 # Constant value example
-    features_for_prediction['feature3'] = (matches_df.index % 3) # Another example
-    
-    # Make sure to handle cases where matches_df might be small
-    if len(matches_df) == 1: # if only one match, make sure features are still 2D for model
-        features_for_prediction = pd.DataFrame(features_for_prediction.iloc[0]).T
+    print(f"Finished generating form features. Resulting columns: {matches_with_form.columns.tolist()}")
+    return matches_with_form
 
 
-    print(f"Generated dummy features for {len(matches_df)} matches.")
-    return features_for_prediction
-
-
-def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FILENAME, api_key: str = FOOTBALL_DATA_API_KEY):
+def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FILENAME, api_key: str = FOOTBALL_DATA_API_KEY, source_api: str = 'football-data'):
     """
     Full pipeline: Fetches matches, preprocesses, generates features, predicts, and displays results.
 
@@ -74,97 +63,174 @@ def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FIL
         model_filename (str): Filename of the pre-trained model to load.
         api_key (str): API key for the data source.
     """
-    print(f"Starting prediction pipeline for date: {date_str} using model: {model_filename}")
+    print(f"Starting prediction pipeline for date: {date_str} using model: {model_filename} and API: {source_api}")
 
     # 1. Fetch matches for the day
-    print("\nStep 1: Fetching matches...")
-    raw_matches = get_matches_for_date(date_str, api_key=api_key)
+    # TODO: Implement logic for different source_apis if needed for get_matches_for_date
+    print("\nStep 1: Fetching daily matches...")
+    if source_api == 'football-data':
+        raw_matches = get_matches_for_date(date_str, api_key=api_key)
+    # elif source_api == 'apisports': # Example if you had another source
+        # raw_matches = get_matches_from_apisports(date_str, api_key=APISPORTS_API_KEY_VAR) 
+    else:
+        print(f"Unsupported source_api: {source_api}. Defaulting to football-data.org if key is available.")
+        raw_matches = get_matches_for_date(date_str, api_key=api_key)
+
     if not raw_matches:
-        print("No matches found or API error. Exiting pipeline.")
+        print("No matches found or API error for daily matches. Exiting pipeline.")
         return
-    print(f"Fetched {len(raw_matches)} raw match entries.")
+    print(f"Fetched {len(raw_matches)} raw daily match entries.")
 
     # 2. Preprocess match data (basic preprocessing)
-    print("\nStep 2: Preprocessing match data...")
-    # The preprocess_match_data function returns a DataFrame
-    matches_df = preprocess_match_data(raw_matches)
-    if matches_df.empty:
+    print("\nStep 2: Preprocessing daily match data...")
+    daily_matches_processed_df = preprocess_match_data(raw_matches)
+    if daily_matches_processed_df.empty:
         print("No match data to process after initial preprocessing. Exiting pipeline.")
         return
-    print(f"Preprocessed {len(matches_df)} matches into DataFrame.")
+    
+    # Ensure 'home_team_id' and 'away_team_id' are present after preprocessing.
+    # preprocess_match_data should handle this. If not, they need to be added/mapped here.
+    # Also ensure 'utcDate' is present and correctly formatted (pd.to_datetime).
+    if 'home_team_id' not in daily_matches_processed_df.columns or 'away_team_id' not in daily_matches_processed_df.columns:
+        print("Error: 'home_team_id' or 'away_team_id' not found in preprocessed daily matches. These are required for form feature engineering.")
+        # Manually add them if they are in homeTeam/awayTeam dicts (example)
+        if 'homeTeam' in daily_matches_processed_df.columns and 'id' in daily_matches_processed_df['homeTeam'].iloc[0]:
+             daily_matches_processed_df['home_team_id'] = daily_matches_processed_df['homeTeam'].apply(lambda x: x.get('id'))
+        if 'awayTeam' in daily_matches_processed_df.columns and 'id' in daily_matches_processed_df['awayTeam'].iloc[0]:
+            daily_matches_processed_df['away_team_id'] = daily_matches_processed_df['awayTeam'].apply(lambda x: x.get('id'))
+        
+        if 'home_team_id' not in daily_matches_processed_df.columns or 'away_team_id' not in daily_matches_processed_df.columns:
+             print("Could not derive team IDs. Exiting.")
+             return
+
+    if 'utcDate' not in daily_matches_processed_df.columns:
+        print("Error: 'utcDate' not found in preprocessed daily matches. Required for form features.")
+        return
+    daily_matches_processed_df['utcDate'] = pd.to_datetime(daily_matches_processed_df['utcDate'], errors='coerce')
+    daily_matches_processed_df.dropna(subset=['utcDate', 'home_team_id', 'away_team_id'], inplace=True)
+
+
+    print(f"Preprocessed {len(daily_matches_processed_df)} daily matches into DataFrame. Columns: {daily_matches_processed_df.columns.tolist()}")
     
     # Keep essential info for display later
-    display_info = matches_df[['home_team_name', 'away_team_name']].copy()
+    display_info = daily_matches_processed_df[['home_team_name', 'away_team_name']].copy()
 
-    # 3. Generate features for prediction
-    # This is a CRITICAL step. The features generated here MUST match the
-    # features the model was trained on.
-    print("\nStep 3: Generating features for prediction...")
-    features_df = generate_features_for_prediction(matches_df)
+    # 3. Load/Fetch Historical Data
+    print("\nStep 3: Loading historical match data...")
+    historical_matches_df = pd.DataFrame()
+    if os.path.exists(HISTORICAL_DATA_CSV):
+        try:
+            historical_matches_df = pd.read_csv(HISTORICAL_DATA_CSV)
+            # Ensure required columns for get_team_form_features are present
+            # 'home_team_id', 'away_team_id', 'home_team_score', 'away_team_score', 'utcDate'
+            historical_matches_df['utcDate'] = pd.to_datetime(historical_matches_df['utcDate'], errors='coerce')
+            # Basic validation
+            required_hist_cols = ['home_team_id', 'away_team_id', 'home_team_score', 'away_team_score', 'utcDate']
+            if not all(col in historical_matches_df.columns for col in required_hist_cols):
+                print(f"Warning: Historical data CSV is missing one or more required columns: {required_hist_cols}. Proceeding without it or with dummy data.")
+                historical_matches_df = pd.DataFrame() # Reset if not valid
+            else:
+                print(f"Loaded {len(historical_matches_df)} historical matches from {HISTORICAL_DATA_CSV}.")
+        except Exception as e:
+            print(f"Error loading historical data from {HISTORICAL_DATA_CSV}: {e}. Proceeding with empty historical data.")
+            historical_matches_df = pd.DataFrame()
+    else:
+        print(f"Historical data CSV not found at {HISTORICAL_DATA_CSV}. Using empty historical data.")
+        # NOTE: For a robust pipeline, fetching live historical data or a more reliable source is needed.
+        # Creating a minimal dummy historical set if CSV is missing (as a fallback for pipeline to run)
+        # This is NOT a substitute for a proper historical data source.
+        historical_matches_df = pd.DataFrame({
+            'match_id': [1,2,3,4,5,6],
+            'utcDate': pd.to_datetime(['2022-01-01', '2022-01-05', '2022-01-10', '2022-01-15', '2022-01-20', '2022-01-25']),
+            'home_team_id': [10, 12, 10, 11, 13, 10],
+            'away_team_id': [11, 13, 12, 10, 10, 11],
+            'home_team_score': [1, 0, 2, 2, 3, 1],
+            'away_team_score': [0, 0, 1, 2, 1, 1]
+        })
+        print("Created minimal dummy historical data as no CSV was found.")
+
+
+    # 4. Generate features for prediction (including form features)
+    print("\nStep 4: Generating features for prediction...")
+    # `generate_features_for_prediction` now uses `engineer_form_features`
+    features_df = generate_features_for_prediction(daily_matches_processed_df, historical_matches_df)
+    
     if features_df.empty:
         print("Could not generate features for the matches. Exiting pipeline.")
         return
+
+    # For consistency with model_training.py, add dummy 'feature1', 'feature2', 'feature3'
+    # if they are not already produced by engineer_form_features or preprocess_match_data
+    # This is a temporary step to align with the current model_training.py example.
+    # Ideally, feature generation should be harmonized.
+    if 'feature1' not in features_df.columns:
+        features_df['feature1'] = features_df.index * 0.5 
+    if 'feature2' not in features_df.columns:
+        features_df['feature2'] = 1.0 
+    if 'feature3' not in features_df.columns:
+        features_df['feature3'] = (features_df.index % 3)
     
-    # Ensure feature names match those used in training (example: 'feature1', 'feature2', 'feature3')
-    # If the dummy model from model_training.py was saved, it expects these.
-    # A real model would have more meaningful feature names.
-    expected_features = ['feature1', 'feature2', 'feature3'] # From dummy training
-    if not all(f in features_df.columns for f in expected_features):
-        print(f"Error: Generated features do not match expected features: {expected_features}")
-        print(f"Actual features: {features_df.columns.tolist()}")
-        print("The `generate_features_for_prediction` function needs to produce the same features as the training data.")
+    print(f"Features for prediction generated. Columns: {features_df.columns.tolist()}")
+
+    # Define expected features based on model_training.py's dummy data
+    expected_features = [
+        'feature1', 'feature2', 'feature3',
+        'home_form_W', 'home_form_D', 'home_form_L', 'home_form_games_played',
+        'away_form_W', 'away_form_D', 'away_form_L', 'away_form_games_played'
+    ]
+    
+    # Select only the expected features for the model
+    # Also, ensure they are in the correct order if the model is sensitive to it (though most sklearn models are not by name)
+    missing_features = [f for f in expected_features if f not in features_df.columns]
+    if missing_features:
+        print(f"Error: The final feature set is missing expected features: {missing_features}")
+        print("Ensure preprocess_match_data and engineer_form_features produce these, or adjust expected_features.")
+        print(f"Available features: {features_df.columns.tolist()}")
         return
+        
+    features_for_model = features_df[expected_features]
 
 
-    # 4. Load the pre-trained model
-    print("\nStep 4: Loading pre-trained model...")
+    # 5. Load the pre-trained model
+    print("\nStep 5: Loading pre-trained model...")
     model = load_model(model_filename)
     if model is None:
         print(f"Failed to load model '{model_filename}'. Ensure it's trained and available in the 'models' directory.")
         print("You might need to run the model_training.py script first to create a dummy model.")
         return
 
-    # 5. Make predictions
-    print("\nStep 5: Making predictions...")
+    # 6. Make predictions
+    print("\nStep 6: Making predictions...")
     try:
-        probabilities = model.predict_proba(features_df)
-        # predict_proba returns an array of shape (n_samples, n_classes)
-        # For 3 classes (e.g., Home Win, Draw, Away Win)
+        # Use features_for_model which has the selected and ordered features
+        probabilities = model.predict_proba(features_for_model)
     except Exception as e:
         print(f"Error during model prediction: {e}")
+        print(f"Features passed to model: {features_for_model.columns.tolist()}")
         print("Ensure the features used for prediction are consistent with model training (e.g. dtypes, number of features).")
         return
         
-    # 6. Display results
-    print("\nStep 6: Prediction Results:")
+    # 7. Display results
+    print("\nStep 7: Prediction Results:")
     # Assuming classes are [Home Win, Draw, Away Win] - this depends on model training.
     # The dummy model in model_training.py has classes [0, 1, 2].
     # Let's map them: 0=Home, 1=Draw, 2=Away (this is an assumption!)
     class_labels = getattr(model, 'classes_', None)
     if class_labels is None:
-        # If model.classes_ is not available (e.g. not a scikit-learn classifier, or not fitted)
-        # Fallback to a default or raise error. For dummy model, assume 0, 1, 2.
         print("Warning: model.classes_ not found. Assuming classes [0, 1, 2] mapped to [Home, Draw, Away]")
-        class_mapping = {0: "Home Win", 1: "Draw", 2: "Away Win"}
+        class_mapping = {0: "Home Win", 1: "Draw", 2: "Away Win"} # Default mapping
     else:
-        # Dynamically create mapping based on model's classes
-        # This is more robust if your label encoder changes order or values
-        # You need to define what each class value (e.g. 0, 1, 2) means
-        # For this example, let's assume 0=Home, 1=Draw, 2=Away.
-        # A better way is to save the label encoder or class mapping with the model.
+        # Define based on how 'target' was encoded during training.
+        # For the dummy data in model_training.py, target is [0, 1, 2].
         class_mapping = {
-            # This mapping needs to be defined based on how 'target' was encoded during training
-            # E.g., if 'Home Win' was encoded as 0, 'Draw' as 1, 'Away Win' as 2
             0: "Home Win",  # Assuming class 0 from training is Home Win
             1: "Draw",      # Assuming class 1 from training is Draw
             2: "Away Win"   # Assuming class 2 from training is Away Win
         }
-        # Verify that all model classes are in our mapping
         if not all(c in class_mapping for c in class_labels):
             print(f"Warning: Model classes {class_labels} not fully covered by defined mapping {class_mapping.keys()}. Results might be misinterpreted.")
 
-
-    for i, match_idx in enumerate(display_info.index):
+    for i, match_idx in enumerate(display_info.index): # display_info should have the same index as features_for_model
         home_team = display_info.loc[match_idx, 'home_team_name']
         away_team = display_info.loc[match_idx, 'away_team_name']
         print(f"\nMatch: {home_team} vs {away_team}")
@@ -173,19 +239,11 @@ def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FIL
              print(f"  Warning: Number of probability scores ({probabilities.shape[1]}) does not match number of class labels ({len(class_mapping)}). Probabilities may be misaligned.")
 
         for class_idx, prob in enumerate(probabilities[i]):
-            # Use model.classes_ to get the actual class label for this probability column
-            # This is crucial if the order of classes in predict_proba is not guaranteed
-            # or if the class labels are not simple 0, 1, 2.
             actual_class_label_from_model = class_labels[class_idx] if class_labels is not None and class_idx < len(class_labels) else class_idx
             label_name = class_mapping.get(actual_class_label_from_model, f"Unknown Class ({actual_class_label_from_model})")
             print(f"  - {label_name}: {prob*100:.1f}%")
 
 if __name__ == "__main__":
-    # Ensure you have a trained model file (e.g., "random_forest_model.pkl") in the "models" directory.
-    # You may need to run src/model_training.py first to generate a dummy model.
-    # Also, set the FOOTBALL_DATA_API_KEY environment variable to a valid key to fetch real matches.
-    # If not set, it will use "YOUR_API_TOKEN" and get_matches_for_date will return an empty list.
-
     today = datetime.now().strftime("%Y-%m-%d")
     
     print("======================================================================")
@@ -195,23 +253,29 @@ if __name__ == "__main__":
     print(f"Target model: {DEFAULT_MODEL_FILENAME}")
     model_path_check = os.path.join(os.path.dirname(__file__), '..', 'models', DEFAULT_MODEL_FILENAME)
     print(f"Model exists: {'Yes' if os.path.exists(model_path_check) else 'No - you need to train and save a model first!'}")
+    print(f"Historical data CSV expected at: {HISTORICAL_DATA_CSV}")
+    print(f"Historical data CSV exists: {'Yes' if os.path.exists(HISTORICAL_DATA_CSV) else 'No - will use dummy fallback data.'}")
     print("----------------------------------------------------------------------")
 
-    if FOOTBALL_DATA_API_KEY == "YOUR_API_TOKEN":
-        print("\nWARNING: FOOTBALL_DATA_API_KEY is not set or is using the placeholder.")
-        print("The pipeline will attempt to run but `get_matches_for_date` will return no data.")
-        print("To test with real data, please set this environment variable.")
-        print("To test the pipeline flow with dummy data, ensure a dummy model is generated via `model_training.py`.")
-        # To proceed with a dry run using dummy data, one would typically mock the API call.
-        # For this example, we'll let it call get_matches_for_date which will return empty.
-    
     if not os.path.exists(model_path_check):
         print("\nERROR: Model file not found at expected location:", model_path_check)
         print("Please run the `src/model_training.py` script to generate a sample model,")
         print("or ensure your desired model is correctly placed and named.")
-    
-    # Run the pipeline for today
-    predict_daily_matches(today)
+        print("Pipeline cannot proceed without a model.")
+    elif FOOTBALL_DATA_API_KEY == "YOUR_API_TOKEN":
+        print("\nWARNING: FOOTBALL_DATA_API_KEY is not set or is using the placeholder.")
+        print("The pipeline will attempt to run with dummy data for daily matches if `get_matches_for_date` returns empty,")
+        print("but this is unlikely to yield meaningful results without actual match data.")
+        print("To test with real data, please set the FOOTBALL_DATA_API_KEY environment variable.")
+        # For a full test, even with a dummy model, it's better to have some raw match data.
+        # We'll proceed, and it will likely say "No matches found".
+        predict_daily_matches(today, source_api='football-data') # Specify default API
+    else:
+        # Run the pipeline for today using football-data by default
+        predict_daily_matches(today, source_api='football-data')
+        # Example for another API (if implemented and key set)
+        # predict_daily_matches(today, source_api='apisports')
+
 
     print("\n----------------------------------------------------------------------")
     print("Pipeline execution finished.")
