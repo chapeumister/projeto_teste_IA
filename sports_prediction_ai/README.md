@@ -62,6 +62,37 @@ sports_prediction_ai/
       On Windows, use `set FOOTBALL_DATA_API_KEY="YOUR_API_TOKEN"` in Command Prompt or `$env:FOOTBALL_DATA_API_KEY="YOUR_API_TOKEN"` in PowerShell.
     - If the API key is not set, the data collection module will use a placeholder and will not fetch real data.
 
+## How to Run
+
+After setting up the project and installing dependencies, you can run the different components as follows:
+
+### 1. Train Models (Example)
+To create initial example models (trained on dummy data):
+```bash
+python src/model_training.py
+```
+This will save `logistic_regression_model.pkl`, `random_forest_model.pkl`, and `xgboost_model.pkl` to the `models/` directory.
+
+### 2. Run Daily Prediction Pipeline
+To make predictions for today's matches (using a pre-trained model, e.g., `random_forest_model.pkl`):
+```bash
+python src/prediction_pipeline.py
+```
+- Make sure `FOOTBALL_DATA_API_KEY` is set to get live match data.
+- The pipeline will use `random_forest_model.pkl` by default. You can modify `DEFAULT_MODEL_FILENAME` in the script to use another model.
+- **Important**: The current feature generation in `prediction_pipeline.py` is placeholder. For meaningful predictions, the features generated must match how the chosen model was actually trained.
+
+### 3. Use Jupyter Notebooks
+The `notebooks/` directory contains examples:
+-   `01_data_collection_and_preprocessing.ipynb`: Demonstrates fetching and initial preprocessing of data.
+-   `02_model_training_and_evaluation.ipynb`: Shows an example of training a model, evaluating it, and running the prediction pipeline within a notebook environment.
+
+Open Jupyter Lab or Jupyter Notebook:
+```bash
+jupyter lab # or jupyter notebook
+```
+Then navigate to the `notebooks/` directory and open the `.ipynb` files.
+
 ## Modules Description
 
 ### `src/data_collection.py`
@@ -98,35 +129,6 @@ sports_prediction_ai/
     6.  Displays the results.
 -   Can be run directly: `python src/prediction_pipeline.py`.
 -   Requires a trained model to be present in the `models/` directory (e.g., by running `src/model_training.py` first).
-
-## How to Run
-
-### 1. Train Models (Example)
-To create initial example models (trained on dummy data):
-```bash
-python src/model_training.py
-```
-This will save `logistic_regression_model.pkl`, `random_forest_model.pkl`, and `xgboost_model.pkl` to the `models/` directory.
-
-### 2. Run Daily Prediction Pipeline
-To make predictions for today's matches (using a pre-trained model, e.g., `random_forest_model.pkl`):
-```bash
-python src/prediction_pipeline.py
-```
-- Make sure `FOOTBALL_DATA_API_KEY` is set to get live match data.
-- The pipeline will use `random_forest_model.pkl` by default. You can modify `DEFAULT_MODEL_FILENAME` in the script to use another model.
-- **Important**: The current feature generation in `prediction_pipeline.py` is placeholder. For meaningful predictions, the features generated must match how the chosen model was actually trained.
-
-### 3. Use Jupyter Notebooks
-The `notebooks/` directory contains examples:
--   `01_data_collection_and_preprocessing.ipynb`: Demonstrates fetching and initial preprocessing of data.
--   `02_model_training_and_evaluation.ipynb`: Shows an example of training a model, evaluating it, and running the prediction pipeline within a notebook environment.
-
-Open Jupyter Lab or Jupyter Notebook:
-```bash
-jupyter lab # or jupyter notebook
-```
-Then navigate to the `notebooks/` directory and open the `.ipynb` files.
 
 ## Future Enhancements (Based on Research Document)
 
