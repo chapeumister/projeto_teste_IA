@@ -7,7 +7,9 @@ from datetime import datetime
 # or a configuration file, rather than hardcoding it.
 # For now, we'll use a placeholder.
 FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY", "YOUR_API_TOKEN")
+APISPORTS_API_KEY = os.getenv("APISPORTS_API_KEY") # New API key
 FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4/"
+APISPORTS_BASE_URL = "https://v3.football.api-sports.io/" # New base URL
 
 def get_matches_for_date(date_str: str, api_key: str = FOOTBALL_DATA_API_KEY):
     """
@@ -69,9 +71,83 @@ if __name__ == "__main__":
     else:
         print("No matches fetched. Ensure your FOOTBALL_DATA_API_KEY environment variable is set correctly.")
 
-    # Placeholder for fetching data from other sources
-    # def get_data_from_api_sports():
-    #     pass
+    print(f"\nFetching matches for today using API-SPORTS: {today_str}")
+    apisports_matches = get_matches_from_apisports(today_str)
 
+    if apisports_matches:
+        print(f"Found {len(apisports_matches)} matches from API-SPORTS:")
+        for match in apisports_matches:
+            fixture = match.get("fixture", {})
+            teams = match.get("teams", {})
+            home_team = teams.get("home", {}).get("name", "N/A")
+            away_team = teams.get("away", {}).get("name", "N/A")
+            competition = match.get("league", {}).get("name", "N/A")
+            match_time_unix = fixture.get("timestamp")
+            match_time_utc = datetime.utcfromtimestamp(match_time_unix).strftime('%Y-%m-%dT%H:%M:%SZ') if match_time_unix else "N/A"
+            status = fixture.get("status", {}).get("long", "N/A")
+            print(f"- {home_team} vs {away_team} (Competition: {competition}, Time UTC: {match_time_utc}, Status: {status})")
+    elif APISPORTS_API_KEY: # Only print this if the key was actually set
+        print("No matches found from API-SPORTS for today, or there was an issue fetching them.")
+    else:
+        # Warning about missing API key is handled within get_matches_from_apisports
+        pass
+
+
+def get_matches_from_apisports(date_str: str, api_key: str = None):
+    """
+    Fetches matches for a specific date from the API-SPORTS (api-football.com) API.
+
+    Args:
+        date_str (str): The date in "YYYY-MM-DD" format.
+        api_key (str, optional): The API key for api-football.com. 
+                                 If None, tries to use APISPORTS_API_KEY environment variable.
+
+    Returns:
+        list: A list of match objects, or an empty list if an error occurs or no matches are found.
+    """
+    resolved_api_key = api_key if api_key is not None else APISPORTS_API_KEY
+
+    if not resolved_api_key:
+        print("Warning: API key for API-SPORTS not provided or found in APISPORTS_API_KEY environment variable.")
+        return []
+
+    headers = {
+        "x-rapidapi-host": "v3.football.api-sports.io",
+        "x-rapidapi-key": resolved_api_key,
+    }
+    api_url = f"{APISPORTS_BASE_URL}fixtures?date={date_str}"
+
+    try:
+        response = requests.get(api_url, headers=headers)
+        # Check for common API errors first
+        if response.status_code == 401:
+            print(f"Error fetching data from API-SPORTS: Unauthorized (401). Check your API key.")
+            return []
+        elif response.status_code == 403:
+            print(f"Error fetching data from API-SPORTS: Forbidden (403). You might not have access to this resource or your API key is invalid/expired.")
+            return []
+        elif response.status_code == 429:
+            print(f"Error fetching data from API-SPORTS: Too Many Requests (429). You may have exceeded your API quota.")
+            return []
+        
+        response.raise_for_status()  # Raises an HTTPError for other bad responses (4XX or 5XX)
+        
+        data = response.json()
+        
+        # Check if the API returned an error message in the JSON body
+        # API-SPORTS error responses often contain a 'errors' key which can be a list or dict
+        if data.get("errors") and (isinstance(data["errors"], list) and data["errors"] or isinstance(data["errors"], dict) and data["errors"]):
+            print(f"API-SPORTS returned errors: {data['errors']}")
+            return []
+            
+        return data.get("response", [])
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data from API-SPORTS: {e}")
+        return []
+    except ValueError as e:  # Handles JSON decoding errors
+        print(f"Error decoding JSON response from API-SPORTS: {e}")
+        return []
+
+    # Placeholder for fetching data from other sources
     # def get_data_from_sportmonks():
     #     pass

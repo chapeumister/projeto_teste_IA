@@ -133,9 +133,23 @@ if __name__ == '__main__':
         'feature1': range(num_samples),
         'feature2': [i * 0.5 for i in range(num_samples)],
         'feature3': [i % 3 for i in range(num_samples)], # A categorical-like feature
+        # New form features
+        'home_form_W': [i % 3 for i in range(num_samples)], # Dummy wins (0, 1, 2)
+        'home_form_D': [i % 2 for i in range(num_samples)], # Dummy draws (0, 1)
+        'home_form_L': [(5 - (i % 3) - (i % 2)) for i in range(num_samples)], # Dummy losses
+        'home_form_games_played': [5] * num_samples,
+        'away_form_W': [(i + 1) % 3 for i in range(num_samples)],
+        'away_form_D': [(i + 1) % 2 for i in range(num_samples)],
+        'away_form_L': [(5 - ((i + 1) % 3) - ((i + 1) % 2)) for i in range(num_samples)],
+        'away_form_games_played': [5] * num_samples,
         'target': [0, 1, 2] * (num_samples // 3) + [0] * (num_samples % 3) # 3 classes: 0, 1, 2
     }
     sample_df = pd.DataFrame(data)
+    
+    # Correcting home_form_L and away_form_L to be non-negative
+    sample_df['home_form_L'] = sample_df.apply(lambda row: max(0, 5 - row['home_form_W'] - row['home_form_D']), axis=1)
+    sample_df['away_form_L'] = sample_df.apply(lambda row: max(0, 5 - row['away_form_W'] - row['away_form_D']), axis=1)
+
 
     # Ensure 'target' column exists
     if 'target' not in sample_df.columns:
@@ -148,11 +162,18 @@ if __name__ == '__main__':
     
     # Ensure all features are numeric for these basic model examples
     # (Real preprocessing would handle this more robustly)
-    for col in ['feature1', 'feature2', 'feature3']:
+    feature_cols = [
+        'feature1', 'feature2', 'feature3',
+        'home_form_W', 'home_form_D', 'home_form_L', 'home_form_games_played',
+        'away_form_W', 'away_form_D', 'away_form_L', 'away_form_games_played'
+    ]
+    for col in feature_cols:
         if col in sample_df.columns:
              sample_df[col] = pd.to_numeric(sample_df[col], errors='coerce').fillna(0)
         else:
-            print(f"Warning: Expected feature column '{col}' not found in dummy data.")
+            print(f"Warning: Expected feature column '{col}' not found in dummy data. Creating it with 0s.")
+            sample_df[col] = 0
+
 
     if not sample_df.empty and 'target' in sample_df.columns and not sample_df.drop(columns=['target']).empty:
         print(f"Sample DataFrame created with shape: {sample_df.shape}")
