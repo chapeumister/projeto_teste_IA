@@ -6,14 +6,14 @@ from datetime import datetime
 # Assuming src is in PYTHONPATH or the script is run from the project root.
 # Adjust imports if necessary based on your execution environment.
 try:
-    from src.data_collection import get_matches_for_date
+    from src.data_collection import get_matches_with_fallback, get_matches_from_apisports
     from src.data_preprocessing import preprocess_match_data
     from src.model_training import load_model
 except ImportError:
     # Fallback for cases where the script might be run directly and src is not in sys.path
     # This is common in simple scripts but less so in structured projects.
     print("Attempting relative imports for src modules...")
-    from data_collection import get_matches_for_date
+    from data_collection import get_matches_with_fallback, get_matches_from_apisports # Updated import
     from data_preprocessing import preprocess_match_data, engineer_form_features # Updated import
     from model_training import load_model
 
@@ -54,7 +54,7 @@ def generate_features_for_prediction(daily_matches_df: pd.DataFrame, historical_
     return matches_with_form
 
 
-def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FILENAME, api_key: str = FOOTBALL_DATA_API_KEY, source_api: str = 'football-data'):
+def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FILENAME, api_key: str = FOOTBALL_DATA_API_KEY, source_api: str = 'football-data', use_mock_data_if_unavailable: bool = False):
     """
     Full pipeline: Fetches matches, preprocesses, generates features, predicts, and displays results.
 
@@ -62,8 +62,10 @@ def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FIL
         date_str (str): Date for which to predict matches ("YYYY-MM-DD").
         model_filename (str): Filename of the pre-trained model to load.
         api_key (str): API key for the data source.
+        source_api (str): The API source to use ('football-data', 'apisports', etc.)
+        use_mock_data_if_unavailable (bool): If True, use mock data if live API fails or returns no data (for football-data.org).
     """
-    print(f"Starting prediction pipeline for date: {date_str} using model: {model_filename} and API: {source_api}")
+    print(f"Starting prediction pipeline for date: {date_str} using model: {model_filename}, API: {source_api}, Mock Fallback: {use_mock_data_if_unavailable}")
 
     # Validate API key before proceeding, especially for football-data
     if source_api == 'football-data':
@@ -72,23 +74,23 @@ def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FIL
             return
 
     # 1. Fetch matches for the day
-    # TODO: Implement logic for different source_apis if needed for get_matches_for_date
+    # TODO: Implement logic for different source_apis if needed for get_matches_with_fallback
     print("\nStep 1: Fetching daily matches...")
     if source_api == 'football-data':
-        raw_matches = get_matches_for_date(date_str, api_key=api_key)
+        raw_matches = get_matches_with_fallback(date_str, use_mock_data=use_mock_data_if_unavailable, api_key=api_key)
     # elif source_api == 'apisports': # Example if you had another source
-        # raw_matches = get_matches_from_apisports(date_str, api_key=APISPORTS_API_KEY_VAR) 
+        # raw_matches = get_matches_from_apisports(date_str, api_key=APISPORTS_API_KEY_VAR) # This would need its own fallback mechanism
     else:
         # For unsupported source_api, if it defaults to football-data, key check is still relevant
         # However, the original logic defaults to football-data without an explicit check here.
         # Let's assume if source_api is not 'football-data', it might be a different API
         # or the get_matches_for_date function (or its alternatives) handles its own key.
         # For now, the explicit key check is only for 'football-data' as per instructions.
-        print(f"Unsupported source_api: {source_api}. Defaulting to football-data.org if key is available.")
+        print(f"Unsupported source_api: {source_api}. Defaulting to football-data.org (via get_matches_with_fallback) if key is available.")
         # If we default to football-data here, the key check above should ideally cover it.
         # To be safe, if it's truly football-data, the key must be valid.
         # This part of the logic might need refinement if multiple API sources are fully implemented.
-        raw_matches = get_matches_for_date(date_str, api_key=api_key) # Assumes get_matches_for_date handles its key if not football-data
+        raw_matches = get_matches_with_fallback(date_str, use_mock_data=use_mock_data_if_unavailable, api_key=api_key) # Defaulting to football-data pathway
 
     if not raw_matches:
         print("No matches found or API error for daily matches. Exiting pipeline.")
@@ -289,6 +291,9 @@ if __name__ == "__main__":
         predict_daily_matches(today, source_api='football-data')
         # Example for another API (if implemented and key set)
         # predict_daily_matches(today, source_api='apisports')
+        
+        # print("\nTrying pipeline with mock data fallback enabled for football-data:")
+        # predict_daily_matches(today, model_filename=DEFAULT_MODEL_FILENAME, api_key=FOOTBALL_DATA_API_KEY, source_api='football-data', use_mock_data_if_unavailable=True)
 
 
     print("\n----------------------------------------------------------------------")
