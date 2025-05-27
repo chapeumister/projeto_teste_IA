@@ -65,6 +65,12 @@ def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FIL
     """
     print(f"Starting prediction pipeline for date: {date_str} using model: {model_filename} and API: {source_api}")
 
+    # Validate API key before proceeding, especially for football-data
+    if source_api == 'football-data':
+        if not api_key or api_key == "YOUR_API_TOKEN":
+            print("Error: Invalid or missing API key in prediction_pipeline.py. Please set the FOOTBALL_DATA_API_KEY environment variable.")
+            return
+
     # 1. Fetch matches for the day
     # TODO: Implement logic for different source_apis if needed for get_matches_for_date
     print("\nStep 1: Fetching daily matches...")
@@ -73,8 +79,16 @@ def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FIL
     # elif source_api == 'apisports': # Example if you had another source
         # raw_matches = get_matches_from_apisports(date_str, api_key=APISPORTS_API_KEY_VAR) 
     else:
+        # For unsupported source_api, if it defaults to football-data, key check is still relevant
+        # However, the original logic defaults to football-data without an explicit check here.
+        # Let's assume if source_api is not 'football-data', it might be a different API
+        # or the get_matches_for_date function (or its alternatives) handles its own key.
+        # For now, the explicit key check is only for 'football-data' as per instructions.
         print(f"Unsupported source_api: {source_api}. Defaulting to football-data.org if key is available.")
-        raw_matches = get_matches_for_date(date_str, api_key=api_key)
+        # If we default to football-data here, the key check above should ideally cover it.
+        # To be safe, if it's truly football-data, the key must be valid.
+        # This part of the logic might need refinement if multiple API sources are fully implemented.
+        raw_matches = get_matches_for_date(date_str, api_key=api_key) # Assumes get_matches_for_date handles its key if not football-data
 
     if not raw_matches:
         print("No matches found or API error for daily matches. Exiting pipeline.")
