@@ -3,7 +3,7 @@ import os
 import requests
 import warnings
 import json # Added json import
-from datetime import datetime
+from datetime import datetime, timedelta # Imported timedelta
 
 # It's good practice to load the API key from an environment variable
 # or a configuration file, rather than hardcoding it.
@@ -30,10 +30,15 @@ def get_matches_for_date(date_str: str, api_key: str = FOOTBALL_DATA_API_KEY):
         return []
 
     headers = {"X-Auth-Token": api_key}
+    # Calculate next_day_str
+    current_date = datetime.strptime(date_str, "%Y-%m-%d")
+    next_day = current_date + timedelta(days=1)
+    next_day_str = next_day.strftime("%Y-%m-%d")
+
     # The API endpoint for matches can vary; v4 uses /matches.
-    # The API also supports dateFrom and dateTo parameters for ranges.
-    # For a single day, dateFrom and dateTo will be the same.
-    api_url = f"{FOOTBALL_DATA_BASE_URL}matches?dateFrom={date_str}&dateTo={date_str}"
+    # Using dateFrom=date_str and dateTo=next_day_str to get matches for the specified day.
+    api_url = f"{FOOTBALL_DATA_BASE_URL}matches?dateFrom={date_str}&dateTo={next_day_str}"
+    print(f"DEBUG: data_collection.py - get_matches_for_date - Requesting URL: {api_url} with API Key: {api_key[:4]}...{api_key[-4:] if len(api_key) > 8 else ''}") # Print URL and part of API key
 
     try:
         response = requests.get(api_url, headers=headers)

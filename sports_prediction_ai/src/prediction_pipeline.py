@@ -20,7 +20,7 @@ except ImportError:
 
 # Configuration
 DEFAULT_MODEL_FILENAME = "random_forest_model.pkl" # Example: use Random Forest by default
-FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY", "YOUR_API_TOKEN")
+FOOTBALL_DATA_API_KEY = os.getenv("API_KEY", "YOUR_API_TOKEN") # Use API_KEY env var
 HISTORICAL_DATA_CSV = os.path.join(os.path.dirname(__file__), '..', 'data', 'historical_matches_sample.csv')
 
 
@@ -260,12 +260,14 @@ def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FIL
             print(f"  - {label_name}: {prob*100:.1f}%")
 
 if __name__ == "__main__":
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now().strftime("%Y-%m-%d") # Use dynamic today
     
     print("======================================================================")
     print("Running Daily Match Prediction Pipeline")
     print("======================================================================")
-    print(f"API Key set: {'Yes' if FOOTBALL_DATA_API_KEY != 'YOUR_API_TOKEN' else 'No (using placeholder - will not fetch real data)'}")
+    # Ensure the global FOOTBALL_DATA_API_KEY is up-to-date from the environment for the check
+    current_api_key_value = os.getenv("API_KEY", "YOUR_API_TOKEN")
+    print(f"API Key set: {'Yes' if current_api_key_value != 'YOUR_API_TOKEN' else 'No (using placeholder - will not fetch real data)'}")
     print(f"Target model: {DEFAULT_MODEL_FILENAME}")
     model_path_check = os.path.join(os.path.dirname(__file__), '..', 'models', DEFAULT_MODEL_FILENAME)
     print(f"Model exists: {'Yes' if os.path.exists(model_path_check) else 'No - you need to train and save a model first!'}")
@@ -278,22 +280,21 @@ if __name__ == "__main__":
         print("Please run the `src/model_training.py` script to generate a sample model,")
         print("or ensure your desired model is correctly placed and named.")
         print("Pipeline cannot proceed without a model.")
-    elif FOOTBALL_DATA_API_KEY == "YOUR_API_TOKEN":
-        print("\nWARNING: FOOTBALL_DATA_API_KEY is not set or is using the placeholder.")
-        print("The pipeline will attempt to run with dummy data for daily matches if `get_matches_for_date` returns empty,")
-        print("but this is unlikely to yield meaningful results without actual match data.")
-        print("To test with real data, please set the FOOTBALL_DATA_API_KEY environment variable.")
-        # For a full test, even with a dummy model, it's better to have some raw match data.
-        # We'll proceed, and it will likely say "No matches found".
-        predict_daily_matches(today, source_api='football-data') # Specify default API
+    # Use the current_api_key_value for the check here as well
+    elif current_api_key_value == "YOUR_API_TOKEN":
+        print("\nWARNING: API_KEY is not set or is using the placeholder.")
+        print("The pipeline will attempt to run with mock data for daily matches because `use_mock_data_if_unavailable=True` is set.")
+        print("To test with real data, please set the API_KEY environment variable.")
+        # Call predict_daily_matches with today's date and mock data fallback enabled.
+        predict_daily_matches(today, source_api='football-data', api_key=current_api_key_value, use_mock_data_if_unavailable=True)
+
     else:
-        # Run the pipeline for today using football-data by default
-        predict_daily_matches(today, source_api='football-data')
-        # Example for another API (if implemented and key set)
-        # predict_daily_matches(today, source_api='apisports')
+        # API key is set, run the pipeline for today, with mock data fallback.
+        print(f"\nINFO: API_KEY is set. Attempting to run for date: {today} with live data, mock data fallback enabled.")
+        predict_daily_matches(today, source_api='football-data', api_key=current_api_key_value, use_mock_data_if_unavailable=True)
         
-        # print("\nTrying pipeline with mock data fallback enabled for football-data:")
-        # predict_daily_matches(today, model_filename=DEFAULT_MODEL_FILENAME, api_key=FOOTBALL_DATA_API_KEY, source_api='football-data', use_mock_data_if_unavailable=True)
+        # Example for another API (if implemented and key set)
+        # predict_daily_matches(today, source_api='apisports', api_key=APISPORTS_API_KEY_ENV_VAR_IF_DIFFERENT) # Ensure this uses a different key if needed
 
 
     print("\n----------------------------------------------------------------------")

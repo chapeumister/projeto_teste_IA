@@ -6,16 +6,18 @@
       "competition": { "name": "Mock League" },
       "utcDate": "2024-01-01T18:00:00Z",
       "status": "SCHEDULED",
-      "homeTeam": { "name": "Mock Home Team" },
-      "awayTeam": { "name": "Mock Away Team" }
+      "homeTeam": { "id": 2001, "name": "Mock Home Team" },
+      "awayTeam": { "id": 2002, "name": "Mock Away Team" },
+      "score": { "winner": null, "fullTime": { "home": null, "away": null } }
     },
     {
       "id": 1002,
       "competition": { "name": "Mock League" },
       "utcDate": "2024-01-01T20:00:00Z",
       "status": "SCHEDULED",
-      "homeTeam": { "name": "Another Mock Team" },
-      "awayTeam": { "name": "Yet Another Mock FC" }
+      "homeTeam": { "id": 2003, "name": "Another Mock Team" },
+      "awayTeam": { "id": 2004, "name": "Yet Another Mock FC" },
+      "score": { "winner": null, "fullTime": { "home": null, "away": null } }
     }
   ]
 }

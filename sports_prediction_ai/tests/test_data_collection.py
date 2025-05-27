@@ -116,8 +116,11 @@ def test_get_matches_for_date_network_error(mock_get, capsys):
     matches = get_matches_for_date(SAMPLE_DATE, api_key=MOCK_FOOTBALL_DATA_API_KEY)
     assert matches == []
     captured = capsys.readouterr()
-    assert f"ERROR: Error fetching data from football-data.org: 500 Server Error" in captured.out
-    assert "API Error Details: Status Code: 500" in captured.out # Check for detailed message
+    # Make the first assertion more general for the main error message part
+    assert "ERROR: Error fetching data from football-data.org:" in captured.out
+    # Keep specific checks for the detailed parts of the error
+    assert "API Error Details: Status Code: 500" in captured.out
+    assert "Response Text: Server Error" in captured.out # Also check for response text
 
 @patch('sports_prediction_ai.src.data_collection.requests.get')
 def test_get_matches_for_date_count_zero(mock_get, capsys):
@@ -189,15 +192,13 @@ def test_gwf_returns_real_data_when_available(mock_get_real_matches, capsys):
 
 
 @patch('sports_prediction_ai.src.data_collection.get_matches_for_date')
-@patch('os.path.exists')
-@patch('builtins.open', new_callable=mock_open)
-def test_gwf_returns_mock_data_on_failure_and_flag(mock_file_open, mock_os_path_exists, mock_get_real_matches, capsys):
+@patch('builtins.open', new_callable=mock_open) # Remove os.path.exists patch
+def test_gwf_returns_mock_data_on_failure_and_flag(mock_file_open, mock_get_real_matches, capsys):
     mock_get_real_matches.return_value = []  # API call returns no data
-    mock_os_path_exists.return_value = True  # Mock file exists
+    # mock_os_path_exists.return_value = True # Removed, mock_open handles this implicitly
     mock_file_open.return_value.read.return_value = SAMPLE_MOCK_DATA_CONTENT
     
     # The MOCK_DATA_PATH is defined in data_collection.py. We rely on that path.
-    # If we needed to override it for testing, we could patch 'sports_prediction_ai.src.data_collection.MOCK_DATA_PATH'
     
     matches = get_matches_with_fallback(SAMPLE_DATE, use_mock_data=True, api_key="dummy_key")
     
@@ -205,7 +206,7 @@ def test_gwf_returns_mock_data_on_failure_and_flag(mock_file_open, mock_os_path_
     assert matches == expected_mock_matches
     captured = capsys.readouterr()
     assert f"INFO: No real match data fetched for {SAMPLE_DATE}. Falling back to mock data as requested." in captured.out
-    mock_os_path_exists.assert_called_once_with(MOCK_DATA_PATH)
+    # mock_os_path_exists.assert_called_once_with(MOCK_DATA_PATH) # Removed
     mock_file_open.assert_called_once_with(MOCK_DATA_PATH, 'r')
 
 
@@ -222,15 +223,16 @@ def test_gwf_no_fallback_if_flag_is_false(mock_os_path_exists, mock_get_real_mat
 
 
 @patch('sports_prediction_ai.src.data_collection.get_matches_for_date')
-@patch('os.path.exists')
-def test_gwf_mock_file_not_found(mock_os_path_exists, mock_get_real_matches, capsys):
+@patch('builtins.open') # Patch builtins.open directly
+def test_gwf_mock_file_not_found(mock_open_func, mock_get_real_matches, capsys):
     mock_get_real_matches.return_value = []
-    mock_os_path_exists.return_value = False # Mock file does not exist
+    mock_open_func.side_effect = FileNotFoundError # Configure open to raise FileNotFoundError
     
     matches = get_matches_with_fallback(SAMPLE_DATE, use_mock_data=True, api_key="dummy_key")
     assert matches == []
     captured = capsys.readouterr()
     assert f"ERROR: Mock data file not found at {MOCK_DATA_PATH}" in captured.out
+    mock_open_func.assert_called_once_with(MOCK_DATA_PATH, 'r') # Assert that open was called
 
 
 @patch('sports_prediction_ai.src.data_collection.get_matches_for_date')
@@ -272,19 +274,25 @@ def test_get_matches_from_apisports_no_api_key_env_and_no_arg(capsys):
     assert "Warning: API key for API-SPORTS not provided" in captured.out
 
 
-@patch.dict(os.environ, {"APISPORTS_API_KEY": MOCK_APISPORTS_API_KEY})
+# Use @patch to directly set the module-level variable APISPORTS_API_KEY in data_collection.py
+@patch('sports_prediction_ai.src.data_collection.APISPORTS_API_KEY', MOCK_APISPORTS_API_KEY)
 @patch('sports_prediction_ai.src.data_collection.requests.get')
-def test_get_matches_from_apisports_api_key_from_env(mock_get, capsys): # Added capsys
+def test_get_matches_from_apisports_api_key_from_env(mock_get, capsys): # capsys is already here
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.json.return_value = mock_apisports_success_response
     mock_get.return_value = mock_response
 
-    matches = get_matches_from_apisports(SAMPLE_DATE)
+    # Call the function without passing api_key, so it should use the patched module-level APISPORTS_API_KEY
+    matches = get_matches_from_apisports(SAMPLE_DATE) 
     assert len(matches) == 2
-    assert matches[1]["fixture"]["id"] == 2
-    mock_get.assert_called_once()
-    captured = capsys.readouterr() # Check logging
+    assert matches[1]["fixture"]["id"] == 2 # Example assertion based on mock_apisports_success_response
+    mock_get.assert_called_once() # Ensure requests.get was called
+    
+    # Verify that the "Warning: API key for API-SPORTS not provided..." is NOT in the output
+    captured = capsys.readouterr()
+    assert "Warning: API key for API-SPORTS not provided" not in captured.out
+    # Verify the success log message is present
     assert f"INFO: API-SPORTS API reported 2 results. Fetched 2 matches for date {SAMPLE_DATE}." in captured.out
 
 
