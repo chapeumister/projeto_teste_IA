@@ -1,6 +1,7 @@
 # src/data_collection.py
 import os
 import requests
+import warnings
 from datetime import datetime
 
 # It's good practice to load the API key from an environment variable
@@ -36,7 +37,11 @@ def get_matches_for_date(date_str: str, api_key: str = FOOTBALL_DATA_API_KEY):
     api_url = f"{FOOTBALL_DATA_BASE_URL}matches?dateFrom={date_str}&dateTo={date_str}"
 
     try:
-        response = requests.get(api_url, headers=headers)
+        warnings.warn(
+            "Bypassing SSL certificate verification for api.football-data.org. This is a potential security risk. Consider installing the appropriate SSL certificates for a more secure connection.",
+            UserWarning
+        )
+        response = requests.get(api_url, headers=headers, verify=False)
         response.raise_for_status()  # Raises an HTTPError for bad responses (4XX or 5XX)
         data = response.json()
         return data.get("matches", [])
