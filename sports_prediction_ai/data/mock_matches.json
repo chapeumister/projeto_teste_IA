@@ -1,0 +1,21 @@
+{
+  "count": 2,
+  "matches": [
+    {
+      "id": 1001,
+      "competition": { "name": "Mock League" },
+      "utcDate": "2024-01-01T18:00:00Z",
+      "status": "SCHEDULED",
+      "homeTeam": { "name": "Mock Home Team" },
+      "awayTeam": { "name": "Mock Away Team" }
+    },
+    {
+      "id": 1002,
+      "competition": { "name": "Mock League" },
+      "utcDate": "2024-01-01T20:00:00Z",
+      "status": "SCHEDULED",
+      "homeTeam": { "name": "Another Mock Team" },
+      "awayTeam": { "name": "Yet Another Mock FC" }
+    }
+  ]
+}

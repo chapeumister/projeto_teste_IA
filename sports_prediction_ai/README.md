@@ -70,6 +70,7 @@ sports_prediction_ai/
         ```
         (or equivalent for your OS).
       - If not set, `get_matches_from_apisports` will print a warning and return no data.
+    - **Note on API Key Errors**: The system now provides more specific error messages if an API key is invalid, unauthorized (e.g., HTTP 401/403), or if there are SSL issues during connection, helping to diagnose setup problems more easily.
 
 
 ## How to Run
@@ -108,8 +109,11 @@ Then navigate to the `notebooks/` directory and open the `.ipynb` files.
 
 ### `src/data_collection.py`
 -   Handles fetching match data from external APIs.
--   Includes `get_matches_for_date` for `football-data.org` (requires `FOOTBALL_DATA_API_KEY`).
--   Includes `get_matches_from_apisports` for `api-football.com` (requires `APISPORTS_API_KEY`).
+-   `get_matches_for_date(date_str: str, api_key: str)`: Fetches matches for a specific date from `football-data.org`. This function is primarily called by `get_matches_with_fallback`. It includes detailed error handling for API key issues, network problems, and SSL errors.
+-   `get_matches_with_fallback(date_str: str, use_mock_data: bool = False, api_key: str)`: The primary function for fetching matches from `football-data.org`.
+    -   It first attempts to fetch live data using `get_matches_for_date`.
+    -   If live data fetching fails (e.g., due to API errors, no matches found, or network issues) AND the `use_mock_data` parameter is set to `True`, it will attempt to load mock match data from `data/mock_matches.json`. This is useful for development and testing when live API access is unavailable or problematic.
+-   `get_matches_from_apisports(date_str: str, api_key: str = None)`: Fetches matches for a specific date from `api-football.com` (API-SPORTS). This function also includes detailed logging regarding the number of matches fetched versus what the API reports, aiding in identifying discrepancies. Requires `APISPORTS_API_KEY`.
 
 ### `src/data_preprocessing.py`
 -   Responsible for cleaning raw API data and transforming it into a structured format (Pandas DataFrame).
@@ -133,7 +137,7 @@ Then navigate to the `notebooks/` directory and open the `.ipynb` files.
 
 ### `src/prediction_pipeline.py`
 -   Integrates the other modules to provide an end-to-end prediction flow:
-    1.  Fetches matches for the current day (or a specified date) using one of the integrated APIs.
+    1.  Fetches matches for the current day (or a specified date) using `get_matches_with_fallback` for `football-data.org` or `get_matches_from_apisports` for API-SPORTS. The `predict_daily_matches` function in this module has a `use_mock_data_if_unavailable` parameter (defaulting to `False`) which, if `True`, allows `get_matches_with_fallback` to use `data/mock_matches.json` if live data fetching from `football-data.org` fails.
     2.  Preprocesses the raw match data.
     3.  **Loads historical match data**: Attempts to load from `data/historical_matches_sample.csv`. If this file is not found or is invalid, it falls back to a minimal internal dummy dataset for demonstration purposes. For production use, a robust historical data source is essential.
     4.  **Generates features for prediction**: This step now includes the calculation of team form features (W-D-L over last N games) using `engineer_form_features` from `data_preprocessing.py`. It also adds other placeholder features (`feature1`, `feature2`, `feature3`) to align with the example model training script.
@@ -147,6 +151,7 @@ Then navigate to the `notebooks/` directory and open the `.ipynb` files.
 ## Data Files
 
 -   **`data/historical_matches_sample.csv`**: A sample CSV file containing dummy historical match data. This file is used by `prediction_pipeline.py` and can be used in notebooks to demonstrate the calculation of team form features. It includes columns like `home_team_id`, `away_team_id`, `home_team_score`, `away_team_score`, and `utcDate`. For serious use, this should be replaced with a comprehensive and regularly updated historical dataset.
+-   **`data/mock_matches.json`**: A sample JSON file containing mock match data in the `football-data.org` API format. This is used by `get_matches_with_fallback` if live data fetching fails and the `use_mock_data` option is enabled, allowing for development and testing without live API calls.
 
 ## Future Enhancements (Based on Research Document)
 
