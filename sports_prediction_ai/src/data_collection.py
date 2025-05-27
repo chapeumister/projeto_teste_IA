@@ -23,11 +23,9 @@ def get_matches_for_date(date_str: str, api_key: str = FOOTBALL_DATA_API_KEY):
     Returns:
         list: A list of match objects, or an empty list if an error occurs or no matches are found.
     """
-    if api_key == "YOUR_API_TOKEN":
-        print("Warning: Using a placeholder API key for football-data.org. Please set the FOOTBALL_DATA_API_KEY environment variable.")
-        # Return an empty list or raise an error, as per desired behavior when no key is set.
-        # For this example, we'll return an empty list to avoid breaking the flow
-        # if the user hasn't set up an API key yet for initial testing.
+    if not api_key or api_key == "YOUR_API_TOKEN":
+        print("Error: Invalid or missing API key for football-data.org. Please set the FOOTBALL_DATA_API_KEY environment variable with a valid key.")
+        # Return an empty list as per current behavior for placeholder/missing key.
         return []
 
     headers = {"X-Auth-Token": api_key}
@@ -37,15 +35,16 @@ def get_matches_for_date(date_str: str, api_key: str = FOOTBALL_DATA_API_KEY):
     api_url = f"{FOOTBALL_DATA_BASE_URL}matches?dateFrom={date_str}&dateTo={date_str}"
 
     try:
-        warnings.warn(
-            "Bypassing SSL certificate verification for api.football-data.org. This is a potential security risk. Consider installing the appropriate SSL certificates for a more secure connection.",
-            UserWarning
-        )
-        response = requests.get(api_url, headers=headers, verify=False)
+        response = requests.get(api_url, headers=headers)
         response.raise_for_status()  # Raises an HTTPError for bad responses (4XX or 5XX)
         data = response.json()
         return data.get("matches", [])
     except requests.exceptions.RequestException as e:
+        # Print detailed API error information first, if available
+        if e.response is not None:
+            print(f"API Error Details: Status Code: {e.response.status_code}")
+            print(f"Response Text: {e.response.text}")
+        # Then print the general error message
         print(f"Error fetching data from football-data.org: {e}")
         return []
     except ValueError as e: # Handles JSON decoding errors
@@ -147,6 +146,11 @@ def get_matches_from_apisports(date_str: str, api_key: str = None):
             
         return data.get("response", [])
     except requests.exceptions.RequestException as e:
+        # Print detailed API error information first, if available
+        if e.response is not None:
+            print(f"API Error Details (API-SPORTS): Status Code: {e.response.status_code}")
+            print(f"Response Text (API-SPORTS): {e.response.text}")
+        # Then print the general error message
         print(f"Error fetching data from API-SPORTS: {e}")
         return []
     except ValueError as e:  # Handles JSON decoding errors
