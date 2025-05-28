@@ -21,7 +21,7 @@ except ImportError:
 # Configuration
 DEFAULT_MODEL_FILENAME = "random_forest_model.pkl" # Example: use Random Forest by default
 FOOTBALL_DATA_API_KEY = os.getenv("API_KEY", "YOUR_API_TOKEN") # Use API_KEY env var
-HISTORICAL_DATA_CSV = os.path.join(os.path.dirname(__file__), '..', 'data', 'historical_matches_sample.csv')
+HISTORICAL_DATA_CSV = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'historical_matches_sample.csv')
 
 
 def generate_features_for_prediction(daily_matches_df: pd.DataFrame, historical_matches_df: pd.DataFrame) -> pd.DataFrame:
@@ -191,8 +191,12 @@ def predict_daily_matches(date_str: str, model_filename: str = DEFAULT_MODEL_FIL
     # Define expected features based on model_training.py's dummy data
     expected_features = [
         'feature1', 'feature2', 'feature3',
-        'home_form_W', 'home_form_D', 'home_form_L', 'home_form_games_played',
-        'away_form_W', 'away_form_D', 'away_form_L', 'away_form_games_played'
+        'home_form_overall_W', 'home_form_overall_D', 'home_form_overall_L', 'home_form_overall_games_played',
+        'home_form_home_W', 'home_form_home_D', 'home_form_home_L', 'home_form_home_games_played',
+        'home_form_away_W', 'home_form_away_D', 'home_form_away_L', 'home_form_away_games_played',
+        'away_form_overall_W', 'away_form_overall_D', 'away_form_overall_L', 'away_form_overall_games_played',
+        'away_form_home_W', 'away_form_home_D', 'away_form_home_L', 'away_form_home_games_played',
+        'away_form_away_W', 'away_form_away_D', 'away_form_away_L', 'away_form_away_games_played'
     ]
     
     # Select only the expected features for the model

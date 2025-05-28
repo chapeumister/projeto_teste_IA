@@ -1,6 +1,6 @@
 # src/model_training.py
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 # It's good practice to import xgboost only if available, or list it as a core dependency.
@@ -68,16 +68,36 @@ def train_random_forest(X_train: pd.DataFrame, y_train: pd.Series, model_filenam
         model_filename (str): Filename to save the trained model.
 
     Returns:
-        RandomForestClassifier: The trained model.
+        RandomForestClassifier: The best trained model found by GridSearchCV.
     """
-    print("Training Random Forest model...")
-    model = RandomForestClassifier(random_state=42, n_estimators=100) # Basic parameters
-    model.fit(X_train, y_train)
+    print("Training Random Forest model with GridSearchCV...")
+
+    param_grid = {
+        'n_estimators': [50, 100], # Reduced for faster execution in this context
+        'max_depth': [None, 10], # Reduced options
+        'min_samples_split': [2, 5],
+        'min_samples_leaf': [1, 2]
+    }
+
+    # Base model
+    rf = RandomForestClassifier(random_state=42)
+
+    # Grid search
+    # Using cv=2 for faster execution in this example; recommend 3 or 5 for real use.
+    grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=2, 
+                               scoring='accuracy', n_jobs=-1, verbose=1)
+    
+    print(f"Fitting GridSearchCV for Random Forest. This might take a while...")
+    grid_search.fit(X_train, y_train)
+
+    best_model = grid_search.best_estimator_
+    print(f"Best parameters found by GridSearchCV: {grid_search.best_params_}")
     
     model_path = os.path.join(MODELS_DIR, model_filename)
-    joblib.dump(model, model_path)
-    print(f"Random Forest model trained and saved to {model_path}")
-    return model
+    joblib.dump(best_model, model_path)
+    print(f"Best Random Forest model saved to {model_path}")
+    
+    return best_model
 
 def train_xgboost(X_train: pd.DataFrame, y_train: pd.Series, model_filename: str = "xgboost_model.pkl"):
     """
@@ -91,12 +111,24 @@ def train_xgboost(X_train: pd.DataFrame, y_train: pd.Series, model_filename: str
     Returns:
         xgb.XGBClassifier: The trained model.
     """
-    print("Training XGBoost model...")
-    # XGBoost requires target to be 0-indexed if it's multiclass
-    # This might need adjustment based on how y_train is encoded.
-    # For now, assuming y_train is already appropriately encoded.
-    model = xgb.XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='mlogloss') # Basic parameters
-    model.fit(X_train, y_train)
+    print("Training XGBoost model with early stopping...")
+
+    # Split the provided training data into a new training set and a validation set for early stopping
+    # Using a small test_size for validation, e.g., 0.1 or 0.2. Let's use 0.15.
+    # Ensure stratify is used if y_train is suitable (e.g., classification target)
+    stratify_option = y_train if y_train.nunique() > 1 else None
+    X_train_xgb, X_val_xgb, y_train_xgb, y_val_xgb = train_test_split(
+        X_train, y_train, test_size=0.15, random_state=42, stratify=stratify_option
+    )
+    
+    print(f"Internal split for XGBoost: X_train_xgb shape: {X_train_xgb.shape}, X_val_xgb shape: {X_val_xgb.shape}")
+
+    model = xgb.XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='mlogloss')
+    
+    model.fit(X_train_xgb, y_train_xgb,
+              eval_set=[(X_val_xgb, y_val_xgb)],
+              early_stopping_rounds=10,
+              verbose=False)
     
     model_path = os.path.join(MODELS_DIR, model_filename)
     joblib.dump(model, model_path)
@@ -133,23 +165,49 @@ if __name__ == '__main__':
         'feature1': range(num_samples),
         'feature2': [i * 0.5 for i in range(num_samples)],
         'feature3': [i % 3 for i in range(num_samples)], # A categorical-like feature
-        # New form features
-        'home_form_W': [i % 3 for i in range(num_samples)], # Dummy wins (0, 1, 2)
-        'home_form_D': [i % 2 for i in range(num_samples)], # Dummy draws (0, 1)
-        'home_form_L': [(5 - (i % 3) - (i % 2)) for i in range(num_samples)], # Dummy losses
-        'home_form_games_played': [5] * num_samples,
-        'away_form_W': [(i + 1) % 3 for i in range(num_samples)],
-        'away_form_D': [(i + 1) % 2 for i in range(num_samples)],
-        'away_form_L': [(5 - ((i + 1) % 3) - ((i + 1) % 2)) for i in range(num_samples)],
-        'away_form_games_played': [5] * num_samples,
+        
+        # New comprehensive form features
+        # Home team
+        'home_form_overall_W': [i % 4 for i in range(num_samples)], # Wins in last 5 overall (0-3)
+        'home_form_overall_D': [i % 2 for i in range(num_samples)], # Draws in last 5 overall (0-1)
+        'home_form_overall_games_played': [5] * num_samples,
+        
+        'home_form_home_W': [i % 3 for i in range(num_samples)],    # Wins in last 5 home (0-2)
+        'home_form_home_D': [i % 2 for i in range(num_samples)],    # Draws in last 5 home (0-1)
+        'home_form_home_games_played': [min(5, 2 + i % 3) for i in range(num_samples)], # Plausible home games played
+
+        'home_form_away_W': [i % 3 for i in range(num_samples)],    # Wins in last 5 away (0-2)
+        'home_form_away_D': [i % 2 for i in range(num_samples)],    # Draws in last 5 away (0-1)
+        'home_form_away_games_played': [min(5, 2 + i % 2) for i in range(num_samples)], # Plausible away games played
+
+        # Away team
+        'away_form_overall_W': [(i+1) % 4 for i in range(num_samples)],
+        'away_form_overall_D': [(i+1) % 2 for i in range(num_samples)],
+        'away_form_overall_games_played': [5] * num_samples,
+
+        'away_form_home_W': [(i+1) % 3 for i in range(num_samples)],
+        'away_form_home_D': [(i+1) % 2 for i in range(num_samples)],
+        'away_form_home_games_played': [min(5, 2 + (i+1) % 3) for i in range(num_samples)],
+
+        'away_form_away_W': [(i+1) % 3 for i in range(num_samples)],
+        'away_form_away_D': [(i+1) % 2 for i in range(num_samples)],
+        'away_form_away_games_played': [min(5, 2 + (i+1) % 2) for i in range(num_samples)],
+        
         'target': [0, 1, 2] * (num_samples // 3) + [0] * (num_samples % 3) # 3 classes: 0, 1, 2
     }
     sample_df = pd.DataFrame(data)
-    
-    # Correcting home_form_L and away_form_L to be non-negative
-    sample_df['home_form_L'] = sample_df.apply(lambda row: max(0, 5 - row['home_form_W'] - row['home_form_D']), axis=1)
-    sample_df['away_form_L'] = sample_df.apply(lambda row: max(0, 5 - row['away_form_W'] - row['away_form_D']), axis=1)
 
+    # Calculate L from W, D, and games_played for all form categories
+    form_categories = [
+        'home_form_overall', 'home_form_home', 'home_form_away',
+        'away_form_overall', 'away_form_home', 'away_form_away'
+    ]
+    for cat in form_categories:
+        w_col = f'{cat}_W'
+        d_col = f'{cat}_D'
+        gp_col = f'{cat}_games_played'
+        l_col = f'{cat}_L'
+        sample_df[l_col] = sample_df.apply(lambda row: max(0, row[gp_col] - row[w_col] - row[d_col]), axis=1)
 
     # Ensure 'target' column exists
     if 'target' not in sample_df.columns:
@@ -164,8 +222,12 @@ if __name__ == '__main__':
     # (Real preprocessing would handle this more robustly)
     feature_cols = [
         'feature1', 'feature2', 'feature3',
-        'home_form_W', 'home_form_D', 'home_form_L', 'home_form_games_played',
-        'away_form_W', 'away_form_D', 'away_form_L', 'away_form_games_played'
+        'home_form_overall_W', 'home_form_overall_D', 'home_form_overall_L', 'home_form_overall_games_played',
+        'home_form_home_W', 'home_form_home_D', 'home_form_home_L', 'home_form_home_games_played',
+        'home_form_away_W', 'home_form_away_D', 'home_form_away_L', 'home_form_away_games_played',
+        'away_form_overall_W', 'away_form_overall_D', 'away_form_overall_L', 'away_form_overall_games_played',
+        'away_form_home_W', 'away_form_home_D', 'away_form_home_L', 'away_form_home_games_played',
+        'away_form_away_W', 'away_form_away_D', 'away_form_away_L', 'away_form_away_games_played'
     ]
     for col in feature_cols:
         if col in sample_df.columns:
