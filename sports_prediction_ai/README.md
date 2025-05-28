@@ -1,172 +1,223 @@
-# Sports Prediction AI Project
+# Comprehensive Sports Data Collection System
 
-This project is a Python-based application designed to predict sports match outcomes using machine learning. It integrates data collection from sports APIs, data preprocessing, model training, and a prediction pipeline, based on the research provided in the issue statement.
+## Overview
 
-## Project Overview
+This project aims to collect historical and real-time sports data from a variety of sources into a centralized SQLite database. The collected data is structured to be suitable for sports analytics, building predictive models, and general AI model training purposes. It emphasizes robust data fetching, idempotent data storage, and configurable data source management.
 
-The core aim is to build a flexible framework that can:
-- Fetch sports data (initially focusing on football/soccer).
-- Preprocess raw data into usable features.
-- Train various machine learning models (Logistic Regression, Random Forest, XGBoost).
-- Evaluate model performance.
-- Provide a pipeline to predict outcomes for upcoming matches.
+## Features
+
+*   **Multiple Data Sources**:
+    *   Kaggle Datasets (e.g., International Football Results)
+    *   Soccer-Data.co.uk (Historical CSVs for various leagues)
+    *   FiveThirtyEight (e.g., Soccer SPI ratings and predictions)
+    *   Football-Data.org API (Historical and daily match data)
+    *   OpenFootball (football.json - various leagues and competitions)
+    *   TheSportsDB API (Events and results for multiple sports)
+    *   API-Sports (via Football-Data.org or direct for daily match data)
+*   **Centralized SQLite Database**: All data is stored in a local SQLite database (`sports_data.sqlite`).
+*   **Automated Data Updates**: The `update_data_all.py` script provides a centralized way to run selected or all data collectors.
+*   **Configurable Data Sources**: Data collection parameters (leagues, seasons, datasets, API settings) are managed via `config.yaml`.
+*   **Resilient Data Fetching**: Implements retry mechanisms (using `tenacity`) for API calls and robust error handling.
+*   **Rate Limiting**: Respects API rate limits using the `ratelimiter` library for relevant sources.
+*   **Idempotent Data Storage**: Uses UPSERT (Update or Insert) logic to avoid duplicate entries and ensure data consistency when scripts are re-run.
+*   **Column Name Normalization**: DataFrames from CSVs have their column names standardized to snake_case for consistency.
+*   **Logging**: Comprehensive logging for data collection processes, stored in rotating log files.
 
 ## Project Structure
 
 ```
 sports_prediction_ai/
-├── data/                     # (Optional) For storing raw or processed data files locally.
-├── evaluation_reports/       # For saving model evaluation outputs (e.g., confusion matrices).
-├── models/                   # For storing trained machine learning models (e.g., .pkl files).
-├── notebooks/                # Jupyter notebooks for experimentation and demonstration.
-│   ├── 01_data_collection_and_preprocessing.ipynb
-│   └── 02_model_training_and_evaluation.ipynb
-├── src/                      # Source code for the project.
+├── config.yaml
+├── README.md
+├── requirements.txt
+├── database/
+│   └── sports_data.sqlite  # Created after running database_setup.py
+├── logs/
+│   └── data_update.log     # Created after running update_data_all.py
+├── data/                   # (Example, might contain mock data or other resources)
+│   └── mock_matches.json
+├── notebooks/              # (Example, for experimental work)
+│   └── 01_data_collection_and_preprocessing.ipynb
+├── src/
 │   ├── __init__.py
-│   ├── data_collection.py    # Module for fetching data from APIs.
-│   ├── data_preprocessing.py # Module for cleaning and transforming data.
-│   ├── model_training.py     # Module for training ML models.
-│   ├── model_evaluation.py   # Module for evaluating model performance.
-│   └── prediction_pipeline.py# Main pipeline for daily predictions.
-├── .gitignore                # Specifies intentionally untracked files that Git should ignore.
-├── README.md                 # This file.
-└── requirements.txt          # Lists Python package dependencies.
+│   ├── database_setup.py
+│   ├── utils.py
+│   ├── data_collection.py  # Daily data from football-data.org & API-Sports
+│   ├── collect_soccer_data_co_uk.py
+│   ├── collect_fivethirtyeight.py
+│   ├── collect_openfootball.py
+│   ├── collect_football_data_org_history.py
+│   ├── collect_kaggle.py
+│   ├── connector_thesportsdb.py
+│   └── update_data_all.py  # Main orchestrator script
+└── tests/                  # (Example, for unit/integration tests)
+    └── __init__.py
 ```
 
 ## Setup and Installation
 
-1.  **Clone the repository (if applicable):**
+1.  **Clone Repository**:
     ```bash
-    # git clone <repository_url>
-    # cd sports_prediction_ai
+    git clone <repository_url>
+    cd sports_prediction_ai
     ```
 
-2.  **Create a virtual environment (recommended):**
+2.  **Create Virtual Environment and Activate**:
     ```bash
     python -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    # On Windows
+    # venv\Scripts\activate
+    # On macOS/Linux
+    # source venv/bin/activate
     ```
 
-3.  **Install dependencies:**
+3.  **Install Dependencies**:
     ```bash
-    pip install -r requirements.txt
+    pip install -r sports_prediction_ai/requirements.txt
     ```
 
-4.  **Set up API Key (for Football-Data.org):**
-    This project uses `football-data.org` as an example data source. To fetch live data, you need an API key.
-    - Register at [football-data.org](https://www.football-data.org/login) to get a free API token.
-    - Set the API token as an environment variable:
-      ```bash
-      export FOOTBALL_DATA_API_KEY="YOUR_API_TOKEN"
-      ```
-      On Windows, use `set FOOTBALL_DATA_API_KEY="YOUR_API_TOKEN"` in Command Prompt or `$env:FOOTBALL_DATA_API_KEY="YOUR_API_TOKEN"` in PowerShell.
-    - If the API key is not set, the data collection module will use a placeholder and will not fetch real data.
-    - (Optional) Set up API Key for API-SPORTS:
-      This project also supports `api-football.com` (API-SPORTS) as a data source.
-      - Register at [RapidAPI](https://rapidapi.com/api-sports/api/api-football) to subscribe to the API and get your key.
-      - Set the API token as an environment variable:
-        ```bash
-        export APISPORTS_API_KEY="YOUR_APISPORTS_API_KEY"
-        ```
-        (or equivalent for your OS).
-      - If not set, `get_matches_from_apisports` will print a warning and return no data.
-    - **Note on API Key Errors**: The system now provides more specific error messages if an API key is invalid, unauthorized (e.g., HTTP 401/403), or if there are SSL issues during connection, helping to diagnose setup problems more easily.
+4.  **API Key Configuration**:
+    Several data sources require API keys. These should be set as environment variables:
+    *   `FOOTBALL_DATA_API_KEY`: For `football-data.org`.
+    *   `APISPORTS_API_KEY`: For `api-sports.io` (used by `data_collection.py`).
+    *   `THESPORTSDB_API_KEY`: For `thesportsdb.com`.
 
+    For Kaggle data:
+    *   Download your `kaggle.json` API token from your Kaggle account page (`Account` -> `API` -> `Create New API Token`).
+    *   Place it in the default Kaggle configuration directory: `~/.kaggle/kaggle.json`.
+    *   Alternatively, you can set the `KAGGLE_USERNAME` and `KAGGLE_KEY` environment variables, or point the `KAGGLE_CONFIG_PATH` environment variable to your `kaggle.json` file's directory.
 
-## How to Run
+5.  **Data Source Configuration (`config.yaml`)**:
+    *   The main configuration file for data collectors is `sports_prediction_ai/config.yaml`.
+    *   This file allows you to specify:
+        *   API base URLs.
+        *   Rate limiting parameters (requests per minute for different sources).
+        *   Leagues, seasons, and specific datasets to download for each collector script.
+    *   Review the comments within `config.yaml` for detailed settings and how to customize which data is fetched.
 
-After setting up the project and installing dependencies, you can run the different components as follows:
+6.  **Initialize Database**:
+    Run the database setup script to create the necessary tables and indexes:
+    ```bash
+    python sports_prediction_ai/src/database_setup.py
+    ```
+    This will create the `sports_prediction_ai/database/sports_data.sqlite` file.
 
-### 1. Train Models (Example)
-To create initial example models (trained on dummy data):
-```bash
-python src/model_training.py
-```
-This will save `logistic_regression_model.pkl`, `random_forest_model.pkl`, and `xgboost_model.pkl` to the `models/` directory.
+## Running Data Collection
 
-### 2. Run Daily Prediction Pipeline
-To make predictions for today's matches (using a pre-trained model, e.g., `random_forest_model.pkl`):
-```bash
-python src/prediction_pipeline.py
-```
-- Make sure `FOOTBALL_DATA_API_KEY` is set to get live match data.
-- The pipeline will use `random_forest_model.pkl` by default. You can modify `DEFAULT_MODEL_FILENAME` in the script to use another model.
-- **Important**: The feature generation in `prediction_pipeline.py` now includes team form features derived from historical data. For meaningful predictions with a custom-trained model, ensure the features generated align with your model's training.
-- The pipeline attempts to load historical data from `data/historical_matches_sample.csv`. If not found, it uses a small internal dummy dataset.
+The primary way to collect and update data is through the `update_data_all.py` script.
 
-### 3. Use Jupyter Notebooks
-The `notebooks/` directory contains examples:
--   `01_data_collection_and_preprocessing.ipynb`: Demonstrates fetching and initial preprocessing of data.
--   `02_model_training_and_evaluation.ipynb`: Shows an example of training a model, evaluating it, and running the prediction pipeline within a notebook environment.
+*   **To run all configured data collectors**:
+    ```bash
+    python sports_prediction_ai/src/update_data_all.py
+    ```
 
-Open Jupyter Lab or Jupyter Notebook:
-```bash
-jupyter lab # or jupyter notebook
-```
-Then navigate to the `notebooks/` directory and open the `.ipynb` files.
+*   **To run specific collectors**:
+    Use the `--sources` argument with a comma-separated list of source names.
+    ```bash
+    python sports_prediction_ai/src/update_data_all.py --sources soccer_data_co_uk,fivethirtyeight
+    ```
+    Available source names are defined in `update_data_all.py` (e.g., `daily_live`, `soccer_data_co_uk`, `fivethirtyeight`, `openfootball`, `fd_org_history`, `kaggle_intl`, `thesportsdb`).
 
-## Modules Description
+*   **Full Historical Refresh**:
+    For collectors that support it (primarily historical data collectors), you can request a full refresh:
+    ```bash
+    python sports_prediction_ai/src/update_data_all.py --sources fd_org_history --full
+    ```
+    This typically re-fetches all available data for the configured seasons/leagues. For daily/current data sources, `--full` might fetch a broader range of recent data if applicable.
 
-### `src/data_collection.py`
--   Handles fetching match data from external APIs.
--   `get_matches_for_date(date_str: str, api_key: str)`: Fetches matches for a specific date from `football-data.org`. This function is primarily called by `get_matches_with_fallback`. It includes detailed error handling for API key issues, network problems, and SSL errors.
--   `get_matches_with_fallback(date_str: str, use_mock_data: bool = False, api_key: str)`: The primary function for fetching matches from `football-data.org`.
-    -   It first attempts to fetch live data using `get_matches_for_date`.
-    -   If live data fetching fails (e.g., due to API errors, no matches found, or network issues) AND the `use_mock_data` parameter is set to `True`, it will attempt to load mock match data from `data/mock_matches.json`. This is useful for development and testing when live API access is unavailable or problematic.
--   `get_matches_from_apisports(date_str: str, api_key: str = None)`: Fetches matches for a specific date from `api-football.com` (API-SPORTS). This function also includes detailed logging regarding the number of matches fetched versus what the API reports, aiding in identifying discrepancies. Requires `APISPORTS_API_KEY`.
+*   **Incremental Updates (Since Date)**:
+    Some collectors might support fetching data since a specific date:
+    ```bash
+    python sports_prediction_ai/src/update_data_all.py --sources daily_live --since YYYY-MM-DD
+    ```
 
-### `src/data_preprocessing.py`
--   Responsible for cleaning raw API data and transforming it into a structured format (Pandas DataFrame).
--   `preprocess_match_data`: Performs initial parsing of match details.
--   `engineer_form_features`: Calculates team form features (Wins, Draws, Losses for the last N games) based on historical match data. It expects a DataFrame of current matches and a DataFrame of historical matches.
--   **Note:** The quality of form features heavily depends on the availability and quality of historical data.
+*   **Individual Scripts**:
+    While `update_data_all.py` is recommended, individual collector scripts located in `sports_prediction_ai/src/` can be run directly for debugging or very specific updates. However, they might not all support the same command-line arguments as the main orchestrator.
 
-### `src/model_training.py`
--   Contains functions for training and saving machine learning models.
-    -   `split_data`: Splits data into training and test sets.
-    -   `train_logistic_regression`, `train_random_forest`, `train_xgboost`: Train respective models.
-    -   `load_model`: Loads a saved model from the `models/` directory.
--   Trained models are saved to the `models/` directory using `joblib`.
--   The script includes a `if __name__ == "__main__":` block that can be run to train and save dummy versions of the models using synthetic data.
+## Logging
 
-### `src/model_evaluation.py`
--   Provides tools to evaluate the performance of trained models.
-    -   `get_classification_metrics`: Calculates accuracy, precision, recall, F1-score, and AUC. Generates a classification report.
-    -   `plot_confusion_matrix`: Saves a plot of the confusion matrix to the `evaluation_reports/` directory.
--   The script includes a `if __name__ == "__main__":` block with example usage.
+*   The `update_data_all.py` script and individual collectors (when run via the orchestrator or if they implement similar logging) generate logs.
+*   Logs are stored in the `sports_prediction_ai/logs/` directory. The main log file is `data_update.log`.
+*   Log files are rotated to manage size (10MB per file, 3 backup files).
 
-### `src/prediction_pipeline.py`
--   Integrates the other modules to provide an end-to-end prediction flow:
-    1.  Fetches matches for the current day (or a specified date) using `get_matches_with_fallback` for `football-data.org` or `get_matches_from_apisports` for API-SPORTS. The `predict_daily_matches` function in this module has a `use_mock_data_if_unavailable` parameter (defaulting to `False`) which, if `True`, allows `get_matches_with_fallback` to use `data/mock_matches.json` if live data fetching from `football-data.org` fails.
-    2.  Preprocesses the raw match data.
-    3.  **Loads historical match data**: Attempts to load from `data/historical_matches_sample.csv`. If this file is not found or is invalid, it falls back to a minimal internal dummy dataset for demonstration purposes. For production use, a robust historical data source is essential.
-    4.  **Generates features for prediction**: This step now includes the calculation of team form features (W-D-L over last N games) using `engineer_form_features` from `data_preprocessing.py`. It also adds other placeholder features (`feature1`, `feature2`, `feature3`) to align with the example model training script.
-    5.  Loads a pre-trained model from the `models/` directory.
-    6.  Makes predictions (outputs probabilities for home win, draw, away win).
-    7.  Displays the results.
--   Can be run directly: `python src/prediction_pipeline.py`.
--   Requires a trained model to be present in the `models/` directory (e.g., by running `src/model_training.py` first).
--   The `data/historical_matches_sample.csv` file provides a small, sample dataset of historical matches. It is used by `prediction_pipeline.py` to demonstrate form feature calculation. Users should replace or augment this with more comprehensive historical data for actual model training and better predictions.
+## Database Schema Overview
 
-## Data Files
+The SQLite database (`sports_data.sqlite`) contains the following main tables:
 
--   **`data/historical_matches_sample.csv`**: A sample CSV file containing dummy historical match data. This file is used by `prediction_pipeline.py` and can be used in notebooks to demonstrate the calculation of team form features. It includes columns like `home_team_id`, `away_team_id`, `home_team_score`, `away_team_score`, and `utcDate`. For serious use, this should be replaced with a comprehensive and regularly updated historical dataset.
--   **`data/mock_matches.json`**: A sample JSON file containing mock match data in the `football-data.org` API format. This is used by `get_matches_with_fallback` if live data fetching fails and the `use_mock_data` option is enabled, allowing for development and testing without live API calls.
+*   **`leagues`**: Stores information about different sports leagues.
+    *   `league_id` (INTEGER, PK): Internal unique ID.
+    *   `name` (TEXT): Name of the league (e.g., "Premier League").
+    *   `sport` (TEXT): Sport type (e.g., "football").
+    *   `country` (TEXT): Country of the league.
+    *   `source_league_id` (TEXT): League ID from the original data source.
+    *   `UNIQUE (name, sport)`
 
-## Future Enhancements (Based on Research Document)
+*   **`teams`**: Stores information about teams.
+    *   `team_id` (INTEGER, PK): Internal unique ID.
+    *   `name` (TEXT): Name of the team.
+    *   `sport` (TEXT): Sport type.
+    *   `country` (TEXT): Country of the team.
+    *   `source_team_id` (TEXT): Team ID from the original data source.
+    *   `UNIQUE (name, sport)`
 
--   **Advanced Feature Engineering**: While basic form features are now included, further expansion (H2H, player stats, Elo ratings, etc.) is key.
--   **Comprehensive Historical Data Management**: Replace `data/historical_matches_sample.csv` with a robust system for collecting, storing, and accessing historical match data (e.g., a database).
--   **Multiple Data Sources**: Further leverage `API-SPORTS` and integrate other sources like `Sportmonks`, `Sportsipy`.
--   **Model Tuning and Selection**: Implement hyperparameter tuning (e.g., GridSearchCV, RandomizedSearchCV) and more rigorous cross-validation strategies.
--   **Ensemble Models**: Experiment with ensembling techniques (e.g., voting classifiers, stacking).
--   **Time Series Models (LSTMs)**: Explore LSTMs for capturing sequential patterns if sufficient temporal data is available.
--   **Database Integration**: Store collected data and predictions in a database for easier management and historical analysis.
--   **API for Predictions**: Expose the prediction pipeline via a simple API (e.g., using Flask/FastAPI).
--   **Continuous Evaluation and Retraining**: Set up a system for ongoing model performance monitoring and periodic retraining.
+*   **`matches`**: Stores details for individual matches.
+    *   `match_id` (INTEGER, PK): Internal unique ID.
+    *   `league_id` (INTEGER, FK): Links to `leagues.league_id`.
+    *   `home_team_id` (INTEGER, FK): Links to `teams.team_id`.
+    *   `away_team_id` (INTEGER, FK): Links to `teams.team_id`.
+    *   `match_datetime_utc` (TEXT): Match start time in UTC (ISO 8601 format).
+    *   `status` (TEXT): Match status (e.g., "SCHEDULED", "FINISHED", "LIVE").
+    *   `home_score` (INTEGER): Full-time home team score.
+    *   `away_score` (INTEGER): Full-time away team score.
+    *   `winner` (TEXT): Winner of the match ("HOME_TEAM", "AWAY_TEAM", "DRAW").
+    *   `stage` (TEXT): Competition stage (e.g., "REGULAR_SEASON", "FINAL", "Group A").
+    *   `matchday` (INTEGER): Matchday or round number.
+    *   `source_match_id` (TEXT): Match ID from the original data source.
+    *   `source_name` (TEXT): Identifier for the data source (e.g., "football-data.org").
+    *   `is_mock` (BOOLEAN): Indicates if the data is from a mock source (DEFAULT 0).
+    *   `UNIQUE (source_match_id, source_name)`
+    *   Indexes on: `match_datetime_utc`, `home_team_id`, `away_team_id`.
+
+*   **`odds`**: Stores betting odds for matches.
+    *   `odd_id` (INTEGER, PK): Internal unique ID.
+    *   `match_id` (INTEGER, FK): Links to `matches.match_id`.
+    *   `bookmaker` (TEXT): Name of the bookmaker.
+    *   `market_type` (TEXT): Type of market (e.g., "1X2", "TOTAL_GOALS_OVER_2.5").
+    *   `home_odds`, `draw_odds`, `away_odds` (REAL): Odds values.
+    *   `timestamp_utc` (TEXT): Timestamp of when the odds were recorded.
+    *   `UNIQUE (match_id, bookmaker, market_type)`
+
+*   **`stats`**: Stores various statistics for matches, teams, or players.
+    *   `stat_id` (INTEGER, PK): Internal unique ID.
+    *   `match_id` (INTEGER, FK): Links to `matches.match_id`.
+    *   `team_id` (INTEGER, FK, Optional): Links to `teams.team_id`.
+    *   `player_id` (INTEGER, FK, Optional): Links to a future `players` table.
+    *   `stat_type` (TEXT): Type of statistic (e.g., "shots_total", "spi_rating").
+    *   `stat_value` (TEXT): Value of the statistic.
+    *   `period` (TEXT, Optional): Game period for the stat (e.g., "FULL_TIME", "1ST_HALF").
+    *   `UNIQUE (match_id, team_id, stat_type, period)`
+
+## Data Collector Scripts (`sports_prediction_ai/src/`)
+
+*   `data_collection.py`: Fetches daily match data from Football-Data.org and API-Sports.
+*   `collect_soccer_data_co_uk.py`: Collects historical football data from CSVs provided by soccer-data.co.uk.
+*   `collect_fivethirtyeight.py`: Downloads and processes datasets from FiveThirtyEight (e.g., Soccer SPI).
+*   `collect_openfootball.py`: Processes data from football.json collections (various leagues).
+*   `collect_football_data_org_history.py`: Fetches historical match data for specified competitions and seasons from Football-Data.org.
+*   `collect_kaggle.py`: Downloads and processes datasets from Kaggle (e.g., historical international results).
+*   `connector_thesportsdb.py`: Fetches current and past events for various sports leagues from TheSportsDB API.
+
+## Future Enhancements
+
+*   Add more data sources and sports.
+*   Implement more detailed player-level statistics.
+*   Integrate with a data visualization dashboard.
+*   Develop and train predictive models using the collected data.
 
 ## Contributing
-(Placeholder for contribution guidelines if this were an open project)
+
+Contributions are welcome! Please fork the repository and submit a pull request with your changes.
 
 ## License
-(Placeholder for license information - e.g., MIT License)
+
+This project is licensed under the MIT License. See the `LICENSE` file for details (if one is added).

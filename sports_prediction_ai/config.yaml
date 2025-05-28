@@ -1,0 +1,145 @@
+# Global settings (if any, can be added later)
+
+# API Base URLs (generally constant but good to have here)
+api_base_urls:
+  football_data_org: "https://api.football-data.org/v4/"
+  api_sports: "https://v3.football.api-sports.io/" # for data_collection.py
+  the_sports_db: "https://www.thesportsdb.com/api/v1/json/" # Note: API key goes into the path later
+  soccer_data_co_uk: "https://www.soccer-data.co.uk"
+  raw_github_fivethirtyeight: "https://raw.githubusercontent.com/fivethirtyeight/data/master/"
+  raw_github_football_json: "https://raw.githubusercontent.com/footballjson/football.json/master/"
+
+# Rate limiting delays in seconds
+api_delays:
+  football_data_org: 7 # For collect_football_data_org_history.py and data_collection.py (if making many calls)
+  the_sports_db: 3   # For connector_thesportsdb.py
+
+# Configuration for collect_soccer_data_co_uk.py
+soccer_data_co_uk:
+  leagues_to_download:
+    - season_path: "mmz4281/2324" # Example: 2023/2024 season
+      league_codes: ["E0", "E1"] # E0=Premier League, E1=Championship
+      league_names: { "E0": "Premier League", "E1": "Championship" }
+      country: "England"
+    - season_path: "mmz4281/2223" # Example: 2022/2023 season
+      league_codes: ["E0", "SP1", "I1", "D1", "F1"] # PL, La Liga, Serie A, Bundesliga, Ligue 1
+      league_names: { "E0": "Premier League", "SP1": "La Liga", "I1": "Serie A", "D1": "Bundesliga", "F1": "Ligue 1"}
+      country: null # Will use specific country per league if needed, or default to parsing from CSV if available
+    # Add other leagues/seasons as desired. Structure allows for specific countries per league code too.
+
+# Configuration for collect_fivethirtyeight.py
+fivethirtyeight:
+  datasets:
+    - file_path: "soccer-spi/spi_matches.csv"
+      sport: "football"
+      parser_function: "parse_and_store_soccer_spi_matches" # The actual function name in the script
+      # Column names from CSV:
+      league_col: "league"
+      home_team_col: "team1"
+      away_team_col: "team2"
+      date_col: "date"
+      home_score_col: "score1"
+      away_score_col: "score2"
+      home_prob_col: "prob1"
+      draw_prob_col: "probtie"
+      away_prob_col: "prob2"
+      home_spi_col: "spi1"
+      away_spi_col: "spi2"
+      home_importance_col: "importance1"
+      away_importance_col: "importance2"
+      league_id_col_csv: "league_id" # Added based on previous collect_fivethirtyeight.py
+    # Add other datasets like nfl-elo, nba-elo later
+
+# Configuration for collect_openfootball.py
+openfootball_football_json:
+  datasets:
+    - path: "2023-24/en.1.json"
+      sport: "football"
+      country: "England"
+    - path: "2022/worldcup.json"
+      sport: "football"
+      country: null # International
+    - path: "2022-23/es.1.json"
+      sport: "football"
+      country: "Spain"
+
+# Configuration for collect_football_data_org_history.py
+football_data_org_history:
+  competitions:
+    - code: "PL"
+      name: "Premier League"
+      country: "England"
+      seasons: [2020, 2021, 2022, 2023] # Year season starts
+    - code: "BL1"
+      name: "Bundesliga"
+      country: "Germany"
+      seasons: [2020, 2021, 2022, 2023]
+    - code: "SA"
+      name: "Serie A"
+      country: "Italy"
+      seasons: [2020, 2021, 2022, 2023]
+    - code: "PD"
+      name: "La Liga"
+      country: "Spain"
+      seasons: [2020, 2021, 2022, 2023]
+    - code: "FL1"
+      name: "Ligue 1"
+      country: "France"
+      seasons: [2020, 2021, 2022, 2023]
+    - code: "WC"
+      name: "FIFA World Cup"
+      country: null # International
+      seasons: [2022]
+
+# Configuration for collect_kaggle.py
+kaggle:
+  datasets:
+    - dataset_id: "martj42/international-football-results-from-1872-to-2017"
+      sport: "football"
+      parser_function: "parse_martj42_intl_football_results"
+      files_to_process: ["results.csv"]
+      default_league_name: "International Matches"
+    # Add other Kaggle dataset configs here
+
+# Configuration for connector_thesportsdb.py
+the_sports_db:
+  leagues_to_track:
+    - id: "4328" # EPL
+      name: "English Premier League"
+      sport: "Soccer" # Use TheSportsDB's sport name
+      country: "England"
+    - id: "4335" # La Liga
+      name: "Spanish La Liga"
+      sport: "Soccer"
+      country: "Spain"
+    - id: "4332" # Serie A
+      name: "Italian Serie A"
+      sport: "Soccer"
+      country: "Italy"
+    - id: "4331" # Bundesliga
+      name: "German Bundesliga"
+      sport: "Soccer"
+      country: "Germany"
+    - id: "4334" # Ligue 1
+      name: "French Ligue 1"
+      sport: "Soccer"
+      country: "France"
+    # - id: "4387" # NBA
+    #   name: "NBA"
+    #   sport: "Basketball"
+    #   country: "USA"
+
+# Configuration for data_collection.py (daily football-data.org and api-sports)
+# Base URLs are global. API keys are via environment variables.
+# Specific leagues for these sources, if needed for targeted daily collection, can be added.
+# For now, these scripts might use broader API queries not tied to specific league lists from this config.
+# If data_collection.py is to be made more targeted by this config, define league IDs/codes here.
+# data_collection_daily:
+#   football_data_org_leagues: ["PL", "BL1"] # Example competition codes
+#   api_sports_leagues: [39, 78] # Example league IDs
+
+sources: # New top-level key or ensure it exists
+  thesportsdb: 
+    req_per_minute: 80   # free-tier hard ceiling ≈100
+  football_data_org: 
+    req_per_minute: 9    # keep a safety margin under 10/min
