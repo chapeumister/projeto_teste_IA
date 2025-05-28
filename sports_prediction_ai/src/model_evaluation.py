@@ -1,5 +1,6 @@
 # src/model_evaluation.py
 import pandas as pd
+from sklearn.model_selection import cross_val_score
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score, classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -159,6 +160,117 @@ if __name__ == '__main__':
     metrics_errors = get_classification_metrics(y_true_sample, y_pred_sample_errors, y_prob_sample, 
                                                 average='weighted', labels=class_labels_numeric, target_names=class_target_names)
     plot_confusion_matrix(y_true_sample, y_pred_sample_errors, labels=class_labels_numeric, display_labels=class_target_names, filename="cm_errors_predictions.png")
+
+    # Example for binary case (if needed, not directly from this dummy data unless we filter)
+    # y_true_binary = y_true_sample[y_true_sample.isin([0,1])].replace({0:0, 1:1}) # filter for two classes
+    # y_pred_binary = y_pred_sample_errors[y_true_sample.isin([0,1])].replace({0:0, 1:1})
+    # y_prob_binary = y_prob_sample[y_true_sample.isin([0,1])][:, :2] # Prob for class 0 and 1
+    # y_prob_binary = y_prob_binary / np.sum(y_prob_binary, axis=1, keepdims=True) # re-normalize
+    
+    # if not y_true_binary.empty:
+    #     print("\n--- Evaluating Binary Subset (Classes 0 and 1) ---")
+    #     metrics_binary = get_classification_metrics(y_true_binary, y_pred_binary, y_prob_binary, 
+    #                                                 average='binary' if y_true_binary.nunique() <=2 else 'weighted', # 'binary' for positive class if applicable
+    #                                                 labels=[0,1], target_names=["Class 0", "Class 1"])
+    #     plot_confusion_matrix(y_true_binary, y_pred_binary, labels=[0,1], display_labels=["Class 0", "Class 1"], filename="cm_binary_subset.png")
+
+    print("\nEvaluation module example run complete.")
+    print(f"Plots, if generated, are saved in: {EVALUATION_OUTPUT_DIR}")
+
+
+def get_cross_val_metrics(model, X: pd.DataFrame, y: pd.Series, cv: int = 5, scoring: list = ['accuracy', 'f1_weighted']):
+    """
+    Performs cross-validation and returns mean and std for specified scoring metrics.
+
+    Args:
+        model: The scikit-learn compatible model to evaluate.
+        X (pd.DataFrame): Feature data.
+        y (pd.Series): Target data.
+        cv (int): Number of cross-validation folds.
+        scoring (list): List of scoring metrics to evaluate (e.g., 'accuracy', 'f1_weighted').
+
+    Returns:
+        dict: A dictionary containing mean and std for each scoring metric.
+              Example: {'accuracy_mean': 0.95, 'accuracy_std': 0.02, ...}
+    """
+    print(f"\nPerforming cross-validation with {cv} folds...")
+    cv_results = {}
+    
+    for metric_name in scoring:
+        try:
+            scores = cross_val_score(model, X, y, cv=cv, scoring=metric_name, n_jobs=-1)
+            mean_score = np.mean(scores)
+            std_score = np.std(scores)
+            
+            cv_results[f'{metric_name}_mean'] = mean_score
+            cv_results[f'{metric_name}_std'] = std_score
+            
+            print(f"  {metric_name}: Mean = {mean_score:.4f}, Std = {std_score:.4f}")
+        except Exception as e:
+            print(f"  Error calculating cross-validation for metric '{metric_name}': {e}")
+            cv_results[f'{metric_name}_mean'] = np.nan
+            cv_results[f'{metric_name}_std'] = np.nan
+            
+    return cv_results
+
+if __name__ == '__main__':
+    # Example Usage (using dummy data similar to model_training.py)
+    print("Model Evaluation module example.")
+
+    # Create dummy data for demonstration (as if from a model's test set output)
+    num_samples = 100
+    # Create dummy X data for cross-validation example
+    X_sample_cv = pd.DataFrame({
+        'featureA': np.random.rand(num_samples),
+        'featureB': np.random.rand(num_samples) * 10
+    })
+    y_true_sample = pd.Series([0, 1, 2] * (num_samples // 3) + [0] * (num_samples % 3), name="true_labels")
+    
+    # Simulate predictions - perfect, some errors, more errors
+    y_pred_sample_good = y_true_sample.copy() # Perfect prediction for simplicity here
+    
+    y_pred_sample_errors = y_true_sample.copy()
+    if len(y_pred_sample_errors) > 5: # Introduce some errors
+        y_pred_sample_errors.iloc[0:5] = (y_pred_sample_errors.iloc[0:5] + 1) % 3 
+
+    # Simulate probabilities (for 3 classes: 0, 1, 2)
+    # Probabilities should sum to 1 across classes for each sample
+    # This is a very simplistic way to generate probabilities
+    y_prob_sample = np.zeros((num_samples, 3))
+    for i in range(num_samples):
+        true_class = y_true_sample.iloc[i]
+        y_prob_sample[i, true_class] = 0.7 # High prob for true class
+        other_classes = [c for c in [0,1,2] if c != true_class]
+        y_prob_sample[i, other_classes[0]] = 0.2
+        y_prob_sample[i, other_classes[1]] = 0.1
+        y_prob_sample[i] = y_prob_sample[i] / np.sum(y_prob_sample[i]) # Normalize
+
+
+    class_labels_numeric = [0, 1, 2]
+    class_target_names = ["Home Win (0)", "Draw (1)", "Away Win (2)"] # Example target names
+
+    print("\n--- Evaluating 'Good' Predictions ---")
+    metrics_good = get_classification_metrics(y_true_sample, y_pred_sample_good, y_prob_sample, 
+                                              average='weighted', labels=class_labels_numeric, target_names=class_target_names)
+    plot_confusion_matrix(y_true_sample, y_pred_sample_good, labels=class_labels_numeric, display_labels=class_target_names, filename="cm_good_predictions.png")
+
+    print("\n--- Evaluating Predictions with Some Errors ---")
+    metrics_errors = get_classification_metrics(y_true_sample, y_pred_sample_errors, y_prob_sample, 
+                                                average='weighted', labels=class_labels_numeric, target_names=class_target_names)
+    plot_confusion_matrix(y_true_sample, y_pred_sample_errors, labels=class_labels_numeric, display_labels=class_target_names, filename="cm_errors_predictions.png")
+
+    # --- Demonstrate get_cross_val_metrics ---
+    print("\n--- Demonstrating Cross-Validation Metrics ---")
+    # Import a simple model for demonstration
+    from sklearn.ensemble import RandomForestClassifier 
+    # Ensure X_sample_cv and y_true_sample are defined and have compatible shapes/lengths
+    if X_sample_cv.shape[0] == y_true_sample.shape[0]:
+        simple_model_for_cv = RandomForestClassifier(random_state=42, n_estimators=10) # Use fewer estimators for speed
+        cv_demo_metrics = get_cross_val_metrics(simple_model_for_cv, X_sample_cv, y_true_sample, cv=2) # cv=2 for speed
+        print("Cross-validation demo metrics:", cv_demo_metrics)
+    else:
+        print("Skipping cross-validation demo due to mismatched X and y shapes.")
+
 
     # Example for binary case (if needed, not directly from this dummy data unless we filter)
     # y_true_binary = y_true_sample[y_true_sample.isin([0,1])].replace({0:0, 1:1}) # filter for two classes

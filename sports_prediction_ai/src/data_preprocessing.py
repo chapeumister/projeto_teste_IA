@@ -27,9 +27,15 @@ def preprocess_match_data(matches_raw_data: list):
         # Example: Extract home team, away team names and scores if available
         # The actual structure depends heavily on the API's response format.
         # This is a generic example assuming football-data.org structure.
-        df['home_team_name'] = df['homeTeam'].apply(lambda x: x.get('name') if isinstance(x, dict) else None)
-        df['away_team_name'] = df['awayTeam'].apply(lambda x: x.get('name') if isinstance(x, dict) else None)
         
+        # Extract basic match and team identifiers
+        df['match_id'] = df['id'] # Assuming 'id' is the match_id at the top level
+        df['home_team_id'] = df['homeTeam'].apply(lambda x: x.get('id') if isinstance(x, dict) else None)
+        df['home_team_name'] = df['homeTeam'].apply(lambda x: x.get('name') if isinstance(x, dict) else None)
+        df['away_team_id'] = df['awayTeam'].apply(lambda x: x.get('id') if isinstance(x, dict) else None)
+        df['away_team_name'] = df['awayTeam'].apply(lambda x: x.get('name') if isinstance(x, dict) else None)
+        df['competition_id'] = df['competition'].apply(lambda x: x.get('id') if isinstance(x, dict) else None)
+
         # Extracting scores - checking if 'score' and 'fullTime' exist
         def extract_score(score_data, team_type):
             if isinstance(score_data, dict) and isinstance(score_data.get('fullTime'), dict):
@@ -60,38 +66,51 @@ if __name__ == '__main__':
     # Example Usage (with dummy data similar to football-data.org)
     sample_matches_data = [
         {
-            "id": 1,
+            "id": 1001, # match_id
             "utcDate": "2023-01-01T15:00:00Z",
             "status": "FINISHED",
             "homeTeam": {"id": 10, "name": "Team A", "shortName": "TMA", "tla": "TA"},
             "awayTeam": {"id": 11, "name": "Team B", "shortName": "TMB", "tla": "TB"},
             "score": {"winner": "HOME_TEAM", "fullTime": {"home": 2, "away": 1}},
-            "competition": {"name": "Sample League"}
+            "competition": {"id": 2021, "name": "Sample League", "code": "SL"}
         },
         {
-            "id": 2,
+            "id": 1002, # match_id
             "utcDate": "2023-01-01T17:30:00Z",
             "status": "FINISHED",
             "homeTeam": {"id": 12, "name": "Team C", "shortName": "TMC", "tla": "TC"},
             "awayTeam": {"id": 13, "name": "Team D", "shortName": "TMD", "tla": "TD"},
             "score": {"winner": "AWAY_TEAM", "fullTime": {"home": 0, "away": 3}},
-            "competition": {"name": "Sample League"}
+            "competition": {"id": 2021, "name": "Sample League", "code": "SL"}
         },
-        { # A match that might not have score details yet (e.g. scheduled)
-            "id": 3,
+        { # A match that might not have score details yet (e.g. scheduled) or missing competition id
+            "id": 1003, # match_id
             "utcDate": "2023-01-02T19:00:00Z",
             "status": "SCHEDULED",
-            "homeTeam": {"id": 10, "name": "Team A"},
-            "awayTeam": {"id": 13, "name": "Team D"},
+            "homeTeam": {"id": 10, "name": "Team A"}, # "id" is present
+            "awayTeam": {"name": "Team D"}, # "id" is missing
             "score": {"winner": None, "fullTime": {"home": None, "away": None}},
-            "competition": {"name": "Sample League"}
+            "competition": {"name": "Another League"} # "id" is missing
+        },
+        { # A match with missing homeTeam and competition structures
+            "id": 1004, # match_id
+            "utcDate": "2023-01-03T19:00:00Z",
+            "status": "SCHEDULED",
+            "homeTeam": None, # Missing homeTeam dict
+            "awayTeam": {"id": 15, "name": "Team E"},
+            "score": {"winner": None, "fullTime": {"home": None, "away": None}},
+            "competition": None # Missing competition dict
         }
     ]
 
     processed_df = preprocess_match_data(sample_matches_data)
     if not processed_df.empty:
         print("\nProcessed DataFrame head:")
-        print(processed_df[['home_team_name', 'away_team_name', 'home_team_score', 'away_team_score', 'utcDate']].head())
+        expected_cols = ['match_id', 'home_team_id', 'home_team_name', 'away_team_id', 'away_team_name', 
+                         'competition_id', 'home_team_score', 'away_team_score', 'utcDate']
+        # Ensure all expected columns exist before trying to print them
+        cols_to_print = [col for col in expected_cols if col in processed_df.columns]
+        print(processed_df[cols_to_print].head())
     else:
         print("\nNo data processed or returned.")
 
@@ -106,24 +125,40 @@ if __name__ == '__main__':
     print(f"Invalid DataFrame columns: {invalid_df.columns}, shape: {invalid_df.shape}")
 
 
-def get_team_form_features(team_id: int, match_date_str: str, historical_matches_df: pd.DataFrame, num_games: int = 5) -> dict:
+def get_team_form_features(team_id: int, match_date_str: str, historical_matches_df: pd.DataFrame, num_games: int = 5, specific_venue: str = None) -> dict:
     """
-    Calculates the form of a given team based on its last N games before a specific match date.
+    Calculates the form of a given team based on its last N games before a specific match date,
+    optionally filtering for home or away games.
 
     Args:
         team_id (int): The ID of the team.
         match_date_str (str): The date of the upcoming match (e.g., "YYYY-MM-DD").
                               Past games will be considered before this date.
         historical_matches_df (pd.DataFrame): DataFrame of past matches. Must include:
-                                              'home_team_id', 'away_team_id', 
-                                              'home_team_score', 'away_team_score', 
+                                              'home_team_id', 'away_team_id',
+                                              'home_team_score', 'away_team_score',
                                               'utcDate' (or a comparable date column).
         num_games (int): The number of recent games to consider for form calculation.
+        specific_venue (str, optional): If 'home', calculate form for home games only.
+                                        If 'away', calculate form for away games only.
+                                        If None, calculate overall form. Defaults to None.
 
     Returns:
-        dict: Form features (e.g., {'form_W': W, 'form_D': D, 'form_L': L, 'form_games_played': N}).
+        dict: Form features. Keys depend on `specific_venue`:
+              - If 'home' or 'away': {'form_spec_venue_W': W, 'form_spec_venue_D': D, ...}
+              - If None: {'form_overall_W': W, 'form_overall_D': D, ...}
     """
-    default_form = {'form_W': 0, 'form_D': 0, 'form_L': 0, 'form_games_played': 0}
+    if specific_venue is None:
+        key_prefix = "form_overall"
+    elif specific_venue == 'home' or specific_venue == 'away':
+        key_prefix = "form_spec_venue"
+    else: # Should not happen with controlled inputs, but as a fallback
+        key_prefix = "form_unknown_venue_type"
+
+    default_form = {
+        f'{key_prefix}_W': 0, f'{key_prefix}_D': 0, f'{key_prefix}_L': 0,
+        f'{key_prefix}_games_played': 0
+    }
 
     if historical_matches_df.empty or team_id is None or match_date_str is None:
         return default_form
@@ -145,11 +180,21 @@ def get_team_form_features(team_id: int, match_date_str: str, historical_matches
     historical_df_copy['utcDate'] = pd.to_datetime(historical_df_copy['utcDate'], errors='coerce')
 
     # Filter for matches involving the team, before the current match_date, and with valid dates
-    team_matches = historical_df_copy[
+    base_filter = (
         ((historical_df_copy['home_team_id'] == team_id) | (historical_df_copy['away_team_id'] == team_id)) &
         (historical_df_copy['utcDate'] < current_match_date) &
         (historical_df_copy['utcDate'].notna())
-    ].copy() # Use .copy() to avoid potential SettingWithCopyWarning later
+    )
+
+    if specific_venue == 'home':
+        venue_filter = (historical_df_copy['home_team_id'] == team_id)
+        team_matches = historical_df_copy[base_filter & venue_filter].copy()
+    elif specific_venue == 'away':
+        venue_filter = (historical_df_copy['away_team_id'] == team_id)
+        team_matches = historical_df_copy[base_filter & venue_filter].copy()
+    else: # Overall form
+        team_matches = historical_df_copy[base_filter].copy()
+
 
     if team_matches.empty:
         return default_form
@@ -193,16 +238,16 @@ def get_team_form_features(team_id: int, match_date_str: str, historical_matches
         # If team_id is not in home or away, it's an issue with the initial filter (should not happen)
 
     return {
-        'form_W': wins,
-        'form_D': draws,
-        'form_L': losses,
-        'form_games_played': actual_games_played # Use the count of games where outcome could be determined
+        f'{key_prefix}_W': wins,
+        f'{key_prefix}_D': draws,
+        f'{key_prefix}_L': losses,
+        f'{key_prefix}_games_played': actual_games_played
     }
 
 
 def engineer_form_features(processed_matches_df: pd.DataFrame, historical_matches_df: pd.DataFrame, num_games: int = 5) -> pd.DataFrame:
     """
-    Engineers team form features (W, D, L for last N games) for matches.
+    Engineers overall, home-specific, and away-specific team form features for matches.
 
     Args:
         processed_matches_df (pd.DataFrame): DataFrame of current/upcoming matches. 
@@ -223,53 +268,74 @@ def engineer_form_features(processed_matches_df: pd.DataFrame, historical_matche
     for col in required_cols_processed:
         if col not in processed_matches_df.columns:
             print(f"Warning: Required column '{col}' not found in processed_matches_df. Cannot engineer form features.")
-            # Add empty form columns to maintain schema consistency if desired, or return df as is
-            for prefix in ['home', 'away']:
-                processed_matches_df[f'{prefix}_form_W'] = 0
-                processed_matches_df[f'{prefix}_form_D'] = 0
-                processed_matches_df[f'{prefix}_form_L'] = 0
-                processed_matches_df[f'{prefix}_form_games_played'] = 0
+            # Add empty form columns for all expected types to maintain schema consistency
+            prefixes = ['home_form_overall_', 'home_form_home_', 'home_form_away_',
+                        'away_form_overall_', 'away_form_home_', 'away_form_away_']
+            suffixes = ['W', 'D', 'L', 'games_played']
+            for p in prefixes:
+                for s in suffixes:
+                    processed_matches_df[f'{p}{s}'] = 0
             return processed_matches_df
-            
-    # Ensure 'utcDate' is datetime for proper comparison by get_team_form_features if it's called with string dates from this df
-    # However, get_team_form_features itself converts its match_date_str argument.
-    # processed_matches_df['utcDate'] = pd.to_datetime(processed_matches_df['utcDate'], errors='coerce')
 
-
-    home_form_features_list = []
-    away_form_features_list = []
+    all_features_list = []
 
     for _, row in processed_matches_df.iterrows():
-        match_date = row['utcDate'] # This should be a datetime object or a string that get_team_form_features can parse
+        match_date = row['utcDate']
+        match_features = {}
+
         if pd.isna(match_date):
-             print(f"Warning: Match date is NaT for a row. Skipping form calculation for this row.")
-             home_form_features_list.append(get_team_form_features(None, None, historical_matches_df, num_games))
-             away_form_features_list.append(get_team_form_features(None, None, historical_matches_df, num_games))
-             continue
+            print(f"Warning: Match date is NaT for a row. Skipping form calculation for this row.")
+            # Append default/empty features for this row
+            team_prefixes = ['home', 'away']
+            venue_types = {'overall': None, 'home': 'home', 'away': 'away'}
+            for team_prefix in team_prefixes:
+                for venue_key, venue_val in venue_types.items():
+                    # Determine the correct key_prefix that get_team_form_features would use
+                    internal_key_prefix = "form_overall" if venue_val is None else "form_spec_venue"
+                    default_single_form = {
+                        f'{internal_key_prefix}_W': 0, f'{internal_key_prefix}_D': 0, f'{internal_key_prefix}_L': 0,
+                        f'{internal_key_prefix}_games_played': 0
+                    }
+                    for k, v in default_single_form.items():
+                        # replace 'form_overall' or 'form_spec_venue' with actual desired column prefix part
+                        col_name_suffix = k.replace('form_overall_', f'form_{venue_key}_').replace('form_spec_venue_', f'form_{venue_key}_')
+                        match_features[f'{team_prefix}_{col_name_suffix}'] = v
+            all_features_list.append(match_features)
+            continue
 
-        # Convert match_date to "YYYY-MM-DD" string if it's a datetime object, as get_team_form_features expects a string
         match_date_str = match_date.strftime('%Y-%m-%d') if isinstance(match_date, pd.Timestamp) else str(match_date)
-
-
+        
         home_team_id = row.get('home_team_id')
         away_team_id = row.get('away_team_id')
 
-        home_form = get_team_form_features(home_team_id, match_date_str, historical_matches_df, num_games)
-        away_form = get_team_form_features(away_team_id, match_date_str, historical_matches_df, num_games)
+        # Home team features
+        home_overall_form = get_team_form_features(home_team_id, match_date_str, historical_matches_df, num_games, specific_venue=None)
+        home_home_form = get_team_form_features(home_team_id, match_date_str, historical_matches_df, num_games, specific_venue='home')
+        home_away_form = get_team_form_features(home_team_id, match_date_str, historical_matches_df, num_games, specific_venue='away')
+
+        # Away team features
+        away_overall_form = get_team_form_features(away_team_id, match_date_str, historical_matches_df, num_games, specific_venue=None)
+        away_home_form = get_team_form_features(away_team_id, match_date_str, historical_matches_df, num_games, specific_venue='home') # team's performance when they were designated home
+        away_away_form = get_team_form_features(away_team_id, match_date_str, historical_matches_df, num_games, specific_venue='away') # team's performance when they were designated away
         
-        home_form_features_list.append(home_form)
-        away_form_features_list.append(away_form)
+        # Consolidate features for the current match
+        # Renaming keys to be more descriptive in the final DataFrame
+        for k, v in home_overall_form.items(): match_features[f"home_{k.replace('form_overall_', 'form_overall_')}"] = v
+        for k, v in home_home_form.items(): match_features[f"home_{k.replace('form_spec_venue_', 'form_home_')}"] = v
+        for k, v in home_away_form.items(): match_features[f"home_{k.replace('form_spec_venue_', 'form_away_')}"] = v
+        
+        for k, v in away_overall_form.items(): match_features[f"away_{k.replace('form_overall_', 'form_overall_')}"] = v
+        for k, v in away_home_form.items(): match_features[f"away_{k.replace('form_spec_venue_', 'form_home_')}"] = v # away team's record when playing at their home
+        for k, v in away_away_form.items(): match_features[f"away_{k.replace('form_spec_venue_', 'form_away_')}"] = v # away team's record when playing at other's home
 
-    # Create DataFrames from the lists of dictionaries
-    home_form_df = pd.DataFrame(home_form_features_list).add_prefix('home_')
-    away_form_df = pd.DataFrame(away_form_features_list).add_prefix('away_')
+        all_features_list.append(match_features)
 
-    # Concatenate the new form feature DataFrames with the original DataFrame
-    # Ensure indices align for concatenation; if processed_matches_df has a custom index, reset it first or align.
+    # Create DataFrame from the list of feature dictionaries
+    form_features_df = pd.DataFrame(all_features_list)
+
+    # Concatenate with the original DataFrame
     result_df = pd.concat([processed_matches_df.reset_index(drop=True), 
-                           home_form_df.reset_index(drop=True), 
-                           away_form_df.reset_index(drop=True)], axis=1)
-    
+                           form_features_df.reset_index(drop=True)], axis=1)
     return result_df
 
 
@@ -296,9 +362,39 @@ if __name__ == '__main__':
     processed_df = preprocess_match_data(sample_matches_data)
     if not processed_df.empty:
         print("\nProcessed DataFrame head (before form features):")
-        print(processed_df[['home_team_name', 'away_team_name', 'home_team_score', 'away_team_score', 'utcDate']].head())
+        # Display relevant columns from the initial processing
+        display_cols_initial = ['match_id', 'home_team_id', 'home_team_name', 'away_team_id', 'away_team_name', 'utcDate']
+        cols_to_print_initial = [col for col in display_cols_initial if col in processed_df.columns]
+        print(processed_df[cols_to_print_initial].head())
 
-        # Create dummy historical data for form calculation
+
+        # --- Test get_team_form_features with specific_venue ---
+        print("\n--- Testing get_team_form_features directly ---")
+        # Create minimal historical data for direct testing
+        sample_hist_data_for_direct_test = {
+            'utcDate': pd.to_datetime(['2022-12-01', '2022-12-05', '2022-12-10', '2022-12-15', '2022-12-20']),
+            'home_team_id':    [10, 20, 10, 30, 10],
+            'away_team_id':    [20, 10, 30, 10, 20],
+            'home_team_score': [1,  0,  2,  1,  3], # Team 10: Home Win, Away Loss, Home Win, Away Draw, Home Win
+            'away_team_score': [0,  1,  1,  1,  0]
+        }
+        sample_historical_df_direct = pd.DataFrame(sample_hist_data_for_direct_test)
+        test_team_id = 10
+        test_match_date = "2023-01-01"
+
+        print(f"\nForm for Team ID {test_team_id} before {test_match_date}:")
+        overall_form = get_team_form_features(test_team_id, test_match_date, sample_historical_df_direct, num_games=5, specific_venue=None)
+        print(f"  Overall Form: {overall_form}") # Expected: 3W, 1D, 1L, 5GP
+
+        home_form = get_team_form_features(test_team_id, test_match_date, sample_historical_df_direct, num_games=5, specific_venue='home')
+        print(f"  Home-Specific Form: {home_form}") # Expected: 3W, 0D, 0L, 3GP
+
+        away_form = get_team_form_features(test_team_id, test_match_date, sample_historical_df_direct, num_games=5, specific_venue='away')
+        print(f"  Away-Specific Form: {away_form}") # Expected: 0W, 1D, 1L, 2GP
+        
+        # --- Test engineer_form_features with detailed output ---
+        print("\n--- Testing engineer_form_features ---")
+        # Create dummy historical data for engineer_form_features calculation
         # Important: Column names must match what get_team_form_features expects
         # 'home_team_id', 'away_team_id', 'home_team_score', 'away_team_score', 'utcDate'
         historical_data = {
@@ -323,14 +419,16 @@ if __name__ == '__main__':
         # So, we need to ensure preprocess_match_data creates 'home_team_id' and 'away_team_id'
         
         # First, let's define a more robust preprocess_match_data that extracts IDs
-        # (The existing one does not create home_team_id/away_team_id)
+        # (The existing one does not create home_team_id/away_team_id) - this comment is now outdated as preprocess_match_data handles it.
         # For this test, let's manually add them to processed_df if they are missing
-        if 'home_team_id' not in processed_df.columns and 'homeTeam' in processed_df.columns:
-            processed_df['home_team_id'] = processed_df['homeTeam'].apply(lambda x: x.get('id') if isinstance(x, dict) else None)
-        if 'away_team_id' not in processed_df.columns and 'awayTeam' in processed_df.columns:
-            processed_df['away_team_id'] = processed_df['awayTeam'].apply(lambda x: x.get('id') if isinstance(x, dict) else None)
+        # if 'home_team_id' not in processed_df.columns and 'homeTeam' in processed_df.columns:
+        #     processed_df['home_team_id'] = processed_df['homeTeam'].apply(lambda x: x.get('id') if isinstance(x, dict) else None)
+        # if 'away_team_id' not in processed_df.columns and 'awayTeam' in processed_df.columns:
+        #     processed_df['away_team_id'] = processed_df['awayTeam'].apply(lambda x: x.get('id') if isinstance(x, dict) else None)
 
         # Drop rows where team IDs might be missing after extraction, or if utcDate is NaT
+        # Note: preprocess_match_data now creates these ID columns.
+        # We rely on them being present for form engineering.
         processed_df_cleaned = processed_df.dropna(subset=['home_team_id', 'away_team_id', 'utcDate']).copy()
 
 
@@ -343,11 +441,26 @@ if __name__ == '__main__':
         # Engineer form features
         matches_with_form = engineer_form_features(processed_df_cleaned, historical_df, num_games=5)
         
-        print("\nMatches DataFrame with Form Features (first 3 matches):")
-        form_cols = [col for col in matches_with_form.columns if 'form' in col]
-        print(matches_with_form[['home_team_id', 'away_team_id', 'utcDate'] + form_cols].head(3))
+        print("\nMatches DataFrame with All Form Features (first 1 match):")
+        # Select a subset of columns for concise display, including new form features
+        cols_to_display = ['match_id', 'home_team_id', 'away_team_id', 'utcDate']
+        # Add some representative form features to display
+        form_feature_suffixes_overall = ['form_overall_W', 'form_overall_games_played']
+        form_feature_suffixes_home = ['form_home_W', 'form_home_games_played']
+        form_feature_suffixes_away = ['form_away_W', 'form_away_games_played']
+        
+        for team_prefix in ['home_', 'away_']:
+            for suffix in form_feature_suffixes_overall: cols_to_display.append(f'{team_prefix}{suffix}')
+            for suffix in form_feature_suffixes_home: cols_to_display.append(f'{team_prefix}{suffix}')
+            for suffix in form_feature_suffixes_away: cols_to_display.append(f'{team_prefix}{suffix}')
+            
+        # Ensure columns exist in the dataframe before trying to print
+        displayable_cols = [col for col in cols_to_display if col in matches_with_form.columns]
+        print(matches_with_form[displayable_cols].head(1))
+
 
         # Example: Test with a team that has fewer than num_games historical matches
+        # This test remains relevant to see how form_xxx_games_played reflects actual games found
         upcoming_match_less_history = pd.DataFrame({
             'match_id': [4],
             'utcDate': [pd.to_datetime("2023-01-03")],
@@ -365,14 +478,16 @@ if __name__ == '__main__':
         combined_historical_df = pd.concat([historical_df, historical_df_less], ignore_index=True)
 
         matches_with_form_less_hist = engineer_form_features(upcoming_match_less_history, combined_historical_df, num_games=5)
-        print("\nMatch with a team having less than 5 historical games:")
-        print(matches_with_form_less_hist[['home_team_id', 'away_team_id', 'utcDate'] + [col for col in matches_with_form_less_hist.columns if 'form' in col]].head())
+        print("\nMatch with a team having less than 5 historical games (displaying selected form features):")
+        displayable_cols_less_hist = [col for col in cols_to_display if col in matches_with_form_less_hist.columns]
+        print(matches_with_form_less_hist[displayable_cols_less_hist].head())
 
         # Test with empty historical_df
-        print("\nTesting with empty historical_df:")
-        empty_historical_df = pd.DataFrame(columns=historical_df.columns)
+        print("\nTesting with empty historical_df (displaying selected form features):")
+        empty_historical_df = pd.DataFrame(columns=historical_df.columns) # Ensure it has same columns for consistency if any part relies on them
         matches_with_empty_hist = engineer_form_features(processed_df_cleaned.head(1).copy(), empty_historical_df, num_games=5)
-        print(matches_with_empty_hist[['home_team_id', 'away_team_id', 'utcDate'] + [col for col in matches_with_empty_hist.columns if 'form' in col]].head())
+        displayable_cols_empty_hist = [col for col in cols_to_display if col in matches_with_empty_hist.columns]
+        print(matches_with_empty_hist[displayable_cols_empty_hist].head())
 
     else:
         print("\nNo data processed initially, skipping form feature engineering examples.")
