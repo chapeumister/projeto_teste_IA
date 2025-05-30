@@ -110,9 +110,9 @@ def test_get_ml_data_basic_flow(mock_db_conn, mock_engineer_form_features, mocke
 
     # Check match_outcome calculation for the first match (Team A 2 vs Team B 1 -> Home Win = 1)
     assert result_df.loc[result_df['match_id'] == 1, 'match_outcome'].iloc[0] == 1
-    # Check match_outcome for the second match (Team C 0 vs Team A 0 -> Draw = 0, but sample data is 2-0, so Home win = 1)
-    # Oh, sample data is Team C 2 vs Team A 0. So home win (1)
-    assert result_df.loc[result_df['match_id'] == 2, 'match_outcome'].iloc[0] == 1
+    # Check match_outcome for the second match (Team C 0 vs Team A 0 -> Draw = 0)
+    # SAMPLE_MATCHES_DATA has home_score=0, away_score=0 for match_id=2
+    assert result_df.loc[result_df['match_id'] == 2, 'match_outcome'].iloc[0] == 0
 
     # Check utcDate column type (renamed from datetime)
     assert pd.api.types.is_datetime64_any_dtype(result_df['utcDate'])
@@ -126,9 +126,10 @@ def test_get_ml_data_with_league_filter(mock_db_conn, mock_engineer_form_feature
     get_ml_ready_dataframe_from_db(mock_db_conn, league_names=league_filter)
 
     # Check the main query for league filter
-    first_call_args = mock_read_sql.call_args_list[0]
-    query_string = first_call_args.args[0] # query is the first positional arg
-    query_params = first_call_args.args[2] # params is the third positional arg
+    first_call_args = mock_read_sql.call_args_list[0] # This is a unittest.mock.call object
+    query_string = first_call_args.args[0]
+    # Params are passed as a keyword argument in pd.read_sql_query(query, conn, params=params)
+    query_params = first_call_args.kwargs.get('params')
 
     assert "l.name IN (?)" in query_string # Check for placeholder
     assert query_params == league_filter
@@ -142,9 +143,9 @@ def test_get_ml_data_with_date_filters(mock_db_conn, mock_engineer_form_features
     date_to_filter = "2023-01-31"
     get_ml_ready_dataframe_from_db(mock_db_conn, date_from=date_from_filter, date_to=date_to_filter)
 
-    first_call_args = mock_read_sql.call_args_list[0]
+    first_call_args = mock_read_sql.call_args_list[0] # This is a unittest.mock.call object
     query_string = first_call_args.args[0]
-    query_params = first_call_args.args[2]
+    query_params = first_call_args.kwargs.get('params')
 
     assert "DATE(m.datetime) >= DATE(?)" in query_string
     assert "DATE(m.datetime) <= DATE(?)" in query_string

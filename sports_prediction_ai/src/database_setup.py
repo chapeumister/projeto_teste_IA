@@ -1,27 +1,42 @@
 import sqlite3
 import os
 
-def create_database():
+def create_database(db_connection=None):
     """
-    Creates an SQLite database with tables for leagues, teams, matches, stats, and odds.
-    The database file will be stored in the 'sports_prediction_ai/data' directory.
+    Creates or sets up tables in an SQLite database.
+    If db_connection is provided, it uses that connection (e.g., for in-memory DBs).
+    Otherwise, it creates/uses the default file-based database in 'sports_prediction_ai/data'.
     """
-    DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
-    os.makedirs(DB_DIR, exist_ok=True)
-    DB_PATH = os.path.join(DB_DIR, 'sports_data.db')
+    conn_was_provided = db_connection is not None
+    conn = db_connection
 
-    conn = None
+    if not conn_was_provided:
+        DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+        os.makedirs(DB_DIR, exist_ok=True)
+        DB_PATH = os.path.join(DB_DIR, 'sports_data.db')
+        try:
+            conn = sqlite3.connect(DB_PATH)
+        except sqlite3.Error as e:
+            print(f"Error connecting to database at {DB_PATH}: {e}")
+            return # Or raise
+
+    if not conn: # If connection failed or was not provided and failed to create
+        print("Database connection not available. Cannot create tables.")
+        return
+
     try:
-        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
         # Create Leagues Table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS leagues (
                 league_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL, -- Name might not be globally unique across different sports/sources
                 sport TEXT NOT NULL,
-                country TEXT
+                country TEXT,
+                source TEXT,
+                api_league_id TEXT, -- For storing the ID from the source API (e.g., TheSportsDB's idLeague)
+                UNIQUE (name, sport, source) -- Composite unique key
             )
         ''')
 
@@ -32,6 +47,8 @@ def create_database():
                 name TEXT NOT NULL UNIQUE,
                 league_id INTEGER,
                 country TEXT,
+                source TEXT,
+                short_name TEXT, -- Added as get_or_create_team inserts it
                 FOREIGN KEY (league_id) REFERENCES leagues (league_id)
             )
         ''')
@@ -85,18 +102,22 @@ def create_database():
                 draw_odds REAL,
                 away_win_odds REAL,
                 last_updated TEXT,
+                source TEXT, -- Source of the odds data
                 FOREIGN KEY (match_id) REFERENCES matches (match_id)
             )
         ''')
 
         conn.commit()
-        print(f"Database created successfully at {DB_PATH}")
+        if not conn_was_provided:
+            print(f"Database created successfully at {DB_PATH}") # DB_PATH is only defined if conn_was_not_provided
+        else:
+            print("Tables created successfully on provided database connection.")
 
     except sqlite3.Error as e:
-        print(f"Error creating database: {e}")
+        print(f"Error creating tables: {e}")
     finally:
-        if conn:
+        if conn and not conn_was_provided: # Only close if this function opened it
             conn.close()
 
 if __name__ == '__main__':
-    create_database()
+    create_database() # Called with no arguments, uses default file DB

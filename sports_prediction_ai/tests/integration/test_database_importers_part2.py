@@ -46,7 +46,11 @@ def test_fte_basic_import_with_stats(in_memory_db, tmp_path):
     matches_added, _, stats_added = import_fivethirtyeight_spi_matches(conn, csv_filepath)
 
     assert matches_added == 3
-    assert stats_added == 3 # 2 for xg, nsxg, adj_score for first match; 1 for xg for third match
+    # Match 1: xg, nsxg, adj_score (3 stats)
+    # Match 2: no stats
+    # Match 3: xg (1 stat)
+    # Total expected stats = 3 + 0 + 1 = 4
+    assert stats_added == 4
 
     cursor = conn.cursor()
     # Verify leagues
@@ -115,7 +119,7 @@ def test_fd_org_json_basic_import(in_memory_db, tmp_path):
     json_filepath = create_temp_json(tmp_path, "fd_org_hist.json", FD_ORG_SAMPLE_JSON_DATA)
     conn = in_memory_db
 
-    matches_added, _ = import_football_data_org_historical_json(conn, json_filepath, competition_code_override="TBL_override", season_year_override=2022)
+    matches_added, _ = import_football_data_org_historical_json(conn, json_filepath, comp_code_override="TBL_override", season_override=2022)
 
     assert matches_added == 2
     cursor = conn.cursor()
@@ -200,9 +204,11 @@ def test_thesportsdb_import_leagues(in_memory_db):
     conn = in_memory_db
     processed_count = import_thesportsdb_leagues(conn, TSDB_SAMPLE_LEAGUES_DATA)
     assert processed_count == 1
-    league = conn.execute("SELECT name, sport, country, source FROM leagues WHERE idLeagueApi = '999'", {"idLeagueApi": "999"}).fetchone() # Assuming idLeagueApi is not in schema, search by name
-    league = conn.execute("SELECT name, sport, country, source FROM leagues WHERE name = 'Test API League'").fetchone()
-    assert league == ("Test API League", "Football", "Testlandia", "TheSportsDB")
+    # Query by the new api_league_id column
+    league_row = conn.execute("SELECT name, sport, country, source, api_league_id FROM leagues WHERE api_league_id = ?", (TSDB_SAMPLE_LEAGUES_DATA[0]['idLeague'],)).fetchone()
+    assert league_row is not None
+    assert league_row[:-1] == ("Test API League", "Football", "Testlandia", "TheSportsDB") # Check all but last (api_league_id)
+    assert league_row[-1] == TSDB_SAMPLE_LEAGUES_DATA[0]['idLeague'] # Check api_league_id
 
 def test_thesportsdb_import_new_events(in_memory_db):
     conn = in_memory_db

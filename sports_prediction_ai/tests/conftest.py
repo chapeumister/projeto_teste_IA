@@ -92,7 +92,8 @@ def tmp_db_session(): # Renamed to avoid conflict if a function-scoped tmp_db is
     conn_fixture = None
     try:
         conn_fixture = sqlite3.connect(db_path)
-        database_setup.create_tables(conn_fixture)
+        # Pass the connection to the modified create_database function
+        database_setup.create_database(db_connection=conn_fixture)
         print(f"Temporary session DB created at: {db_path} with schema.")
     except Exception as e:
         print(f"Error creating temporary session DB at {db_path}: {e}")
@@ -117,7 +118,8 @@ def in_memory_db():
     """Creates an in-memory SQLite DB for a single test, applying the schema."""
     conn = sqlite3.connect(":memory:")
     try:
-        database_setup.create_tables(conn)
+        # Pass the connection to the modified create_database function
+        database_setup.create_database(db_connection=conn)
         print("In-memory DB created with schema for function scope.")
         yield conn
     except Exception as e:

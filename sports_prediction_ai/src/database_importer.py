@@ -29,22 +29,30 @@ def get_db_connection():
 def get_or_create_league(conn, league_name: str, sport: str = "Football", country: str = None, source: str = None) -> int | None:
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT league_id FROM leagues WHERE name = ? AND sport = ?", (league_name, sport))
+        if source:
+            cursor.execute("SELECT league_id FROM leagues WHERE name = ? AND sport = ? AND source = ?", (league_name, sport, source))
+        else:
+            cursor.execute("SELECT league_id FROM leagues WHERE name = ? AND sport = ? AND source IS NULL", (league_name, sport))
         result = cursor.fetchone()
         if result:
             return result[0]
         else:
+            # api_league_id is not handled by this generic function, but by specific importers if needed.
             cursor.execute("""
                 INSERT INTO leagues (name, sport, country, source)
                 VALUES (?, ?, ?, ?)
             """, (league_name, sport, country, source))
             return cursor.lastrowid
-    except sqlite3.IntegrityError:
-        cursor.execute("SELECT league_id FROM leagues WHERE name = ? AND sport = ?", (league_name, sport))
+    except sqlite3.IntegrityError: # Catch conflict on the composite unique key (name, sport, source)
+        # If conflict, try to select again with all provided fields to be sure
+        if source:
+            cursor.execute("SELECT league_id FROM leagues WHERE name = ? AND sport = ? AND source = ?", (league_name, sport, source))
+        else:
+            cursor.execute("SELECT league_id FROM leagues WHERE name = ? AND sport = ? AND source IS NULL", (league_name, sport))
         result = cursor.fetchone()
         return result[0] if result else None
     except sqlite3.Error as e:
-        print(f"Database error in get_or_create_league for '{league_name}': {e}")
+        print(f"Database error in get_or_create_league for '{league_name}', sport '{sport}', source '{source}': {e}")
         return None
 
 def get_or_create_team(conn, team_name: str, country: str = None, league_id: int = None, source: str = None) -> int | None:
@@ -346,10 +354,23 @@ def import_thesportsdb_leagues(conn, leagues_data: list) -> int:
     for l_api_data in leagues_data:
         if not isinstance(l_api_data,dict): print(f"Skipping invalid TSDb league entry: {l_api_data}"); continue
         l_name, sport, country = l_api_data.get('strLeague'), l_api_data.get('strSport'), l_api_data.get('strCountryAlternate') or l_api_data.get('strCountry')
-        if not l_name or not sport: print(f"Skipping TSDb league (no name/sport): {l_api_data.get('idLeague')}"); continue
+        api_specific_league_id = l_api_data.get('idLeague') # TheSportsDB's own ID for the league
+
+        if not l_name or not sport: print(f"Skipping TSDb league (no name/sport): {api_specific_league_id}"); continue
         if sport.lower()=="soccer": sport="Football"
-        if get_or_create_league(conn,l_name,sport,country,source): leagues_processed+=1
-        else: print(f"Failed to process TSDb league: {l_name}")
+
+        league_db_id = get_or_create_league(conn, l_name, sport, country, source)
+
+        if league_db_id:
+            leagues_processed += 1
+            if api_specific_league_id: # If the API provides its own league ID, store/update it
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE leagues SET api_league_id = ? WHERE league_id = ?", (api_specific_league_id, league_db_id))
+                except sqlite3.Error as e:
+                    print(f"Error updating api_league_id for league {l_name} (ID: {league_db_id}): {e}")
+        else:
+            print(f"Failed to process TSDb league: {l_name}")
     print(f"--- Finished TSDb Leagues. Processed {leagues_processed} leagues. ---"); return leagues_processed
 
 def import_thesportsdb_events(conn, events_data: list, default_league_name:str=None, default_sport:str="Football") -> tuple[int,int]:
@@ -372,23 +393,21 @@ def import_thesportsdb_events(conn, events_data: list, default_league_name:str=N
             ht_id,at_id = get_or_create_team(conn,ht_name,None,l_id,source), get_or_create_team(conn,at_name,None,l_id,source)
             if not ht_id or not at_id: print(f"Skipping TSDb event {event_id} (team ID error for {ht_name} or {at_name})"); continue
 
-            # Robust DateTime Parsing from strTimestamp or dateEvent + strTime
+            # Date/Time Parsing (from Turn 118 / subtask description)
             datetime_str_from_api = event.get("strTimestamp")
             date_event_str = event.get("dateEvent")
-            time_str = event.get("strTime", "00:00:00") # Default time
+            time_str = event.get("strTime", "00:00:00")
 
             final_datetime_str_to_parse = None
             if datetime_str_from_api and str(datetime_str_from_api).strip():
                 datetime_str_from_api = str(datetime_str_from_api).strip()
-                # Check if strTimestamp already contains 'Z' or timezone offset
-                if 'Z' not in datetime_str_from_api.upper() and '+' not in datetime_str_from_api and not (len(datetime_str_from_api) > 10 and '-' == datetime_str_from_api[10] and ':' in datetime_str_from_api): # crude check for existing offset
-                    # If no timezone info, and it looks like just a date, append time_str
+                if 'Z' not in datetime_str_from_api.upper() and '+' not in datetime_str_from_api and not (len(datetime_str_from_api) > 10 and '-' == datetime_str_from_api[10] and ':' in datetime_str_from_api):
                     if len(datetime_str_from_api) <= 10:
-                         final_datetime_str_to_parse = f"{datetime_str_from_api} {time_str}"
+                        final_datetime_str_to_parse = f"{datetime_str_from_api} {time_str}"
                     else:
-                         final_datetime_str_to_parse = datetime_str_from_api # Has date and time, assume local/naive
+                        final_datetime_str_to_parse = datetime_str_from_api
                 else:
-                    final_datetime_str_to_parse = datetime_str_from_api # Assume it's timezone-aware or UTC
+                    final_datetime_str_to_parse = datetime_str_from_api
             elif date_event_str and str(date_event_str).strip():
                 final_datetime_str_to_parse = f"{str(date_event_str).strip()} {time_str}"
             else:
@@ -398,7 +417,6 @@ def import_thesportsdb_events(conn, events_data: list, default_league_name:str=N
             match_datetime_iso = None
             try:
                 match_datetime = pd.to_datetime(final_datetime_str_to_parse)
-                # Ensure it's naive UTC or consistently formatted. If it has timezone, convert to UTC then remove tzinfo.
                 if match_datetime.tzinfo is not None:
                     match_datetime = match_datetime.tz_convert('UTC').tz_localize(None)
                 match_datetime_iso = match_datetime.strftime('%Y-%m-%d %H:%M:%S')
@@ -413,118 +431,57 @@ def import_thesportsdb_events(conn, events_data: list, default_league_name:str=N
             a_s = int(raw_away_score) if raw_away_score is not None and str(raw_away_score).strip().isdigit() else None
 
             status_api = event.get('strStatus','').upper()
-            status_db = "SCHEDULED" # Default
-            fin_statuses=["MATCH FINISHED","FT","AET","PEN","FINISHED"] # Added "FINISHED"
+            status_db = "SCHEDULED"
+            fin_statuses=["MATCH FINISHED","FT","AET","PEN","FINISHED"]
             post_statuses=["POSTPONED","CANCELLED","ABANDONED","SUSPENDED"]
-            live_statuses=["LIVE","HT","BREAK"] # Added "BREAK"
+            live_statuses=["LIVE","HT","BREAK"]
 
             if status_api in fin_statuses:
                 status_db="FINISHED"
-                if hs is None or a_s is None: status_db = "AWAITING_SCORES" # Or some other status
+                if hs is None or a_s is None: status_db = "AWAITING_SCORES"
             elif status_api in post_statuses: status_db="POSTPONED"; hs,a_s=None,None
             elif status_api in live_statuses: status_db="LIVE"
-            elif not status_api and (hs is not None or a_s is not None) : # If status is empty but scores exist
-                 status_db = "FINISHED" # Assume finished if scores are present but no status
-            else: # Default for other statuses or empty status with no scores
-                hs,a_s=None,None
+            elif not status_api and (hs is not None or a_s is not None):
+                 status_db = "FINISHED"
+            else: hs,a_s=None,None
 
-            cursor=conn.cursor()
-            # Store current total changes to determine if insert or update occurred
-            initial_changes = conn.total_changes
+            cursor = conn.cursor()
 
+            # Check if match exists based on unique constraint fields
             cursor.execute("""
-                INSERT INTO matches (datetime, home_team_id, away_team_id, league_id, status, home_score, away_score, source, source_match_id, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(datetime, home_team_id, away_team_id, source) DO UPDATE SET
-                    status = excluded.status,
-                    home_score = excluded.home_score,
-                    away_score = excluded.away_score,
-                    source_match_id = excluded.source_match_id, -- Ensures source_match_id is updated if it differs for the same game time/teams
-                    updated_at = CURRENT_TIMESTAMP
-            """, (match_datetime_iso, ht_id, at_id, l_id, status_db, hs, a_s, source, event_id))
+                SELECT match_id FROM matches
+                WHERE datetime = ? AND home_team_id = ? AND away_team_id = ? AND source = ?
+            """, (match_datetime_iso, ht_id, at_id, source))
+            existing_match_row = cursor.fetchone()
 
-            current_changes = conn.total_changes
-            was_row_affected = cursor.rowcount > 0 or current_changes > initial_changes
+            if existing_match_row:
+                existing_match_id = existing_match_row[0]
+                # Perform UPDATE only if data has changed
+                cursor.execute("""SELECT status, home_score, away_score, source_match_id FROM matches WHERE match_id = ?""", (existing_match_id,))
+                current_row_in_db = cursor.fetchone()
 
-            if was_row_affected:
-                # To differentiate insert vs update:
-                # An insert increments last_insert_rowid(). An update does not.
-                # However, lastrowid is only for actual INSERTs.
-                # A simple way: if total_changes increased by 2, it's an update (the conflict + the update itself).
-                # If total_changes increased by 1, it's an insert. This can be finicky.
-                # A more robust check for new insert vs update for counter purposes:
-                # Check if source_match_id was already in DB for this source. This requires a select before insert/update.
-                # For simplicity here with UPSERT, we'll count it as 'updated' if a row was affected
-                # and we can't easily tell if it was new without another query.
-                # The prompt is focused on the UPSERT and updated_at.
-                # Let's assume if rowcount > 0, it was an action. The specific counters are secondary to data correctness here.
+                needs_update = (
+                    current_row_in_db[0] != status_db or
+                    current_row_in_db[1] != hs or # Assumes hs/as are None if not applicable
+                    current_row_in_db[2] != a_s or
+                    current_row_in_db[3] != event_id
+                )
 
-                # A pragmatic way for counters:
-                # If last_insert_rowid refers to this action's potential new row, it's an add.
-                # This is tricky because last_insert_rowid behavior with ON CONFLICT DO UPDATE is not simple.
-                # Let's assume an operation means an update for now, as we are trying to keep existing data fresh.
-                # If a record is truly new, it will be inserted. If it conflicts, it will be updated.
-                # The distinction for "added" vs "updated" counter is less critical than the data being correct.
-
-                # If we want to be more precise:
-                # We could query for the match via source_match_id before the upsert.
-                # If it exists, it's a candidate for 'updated'. If not, for 'added'.
-                # But the subtask removed check_match_exists.
-
-                # Simplified counter logic:
-                # If an insert happened, lastrowid would be the new match_id.
-                # If an update happened, lastrowid is typically not changed or refers to the last *actual* insert.
-                # So, if lastrowid seems to be for *this* operation, count as added.
-                # Otherwise, if rowcount indicates change, count as updated.
-
-                # Check if it was an insert by seeing if lastrowid changed and is for this event
-                # This is not perfectly reliable with ON CONFLICT DO UPDATE.
-                # A common pattern for this is to check if the values actually changed.
-                # For now, if any row was affected, count as 'updated' because the intent is to keep data fresh.
-                # If it was a new row, it's also "updated" from a state of non-existence to existence.
-                if cursor.rowcount > 0 : # cursor.rowcount is 1 if a row is inserted or updated.
-                    # This doesn't perfectly distinguish insert vs update for the counters.
-                    # For now, let's assume if it was touched, it's "updated" in a broad sense.
-                    # A more complex check would be needed for perfect counter separation.
-                    # The main goal is the UPSERT and `updated_at`.
-                    # Let's try to infer: if conn.total_changes increased by 1, it was an insert.
-                    # If conn.total_changes increased by more than 1 (e.g. for an update that caused a change), it was an update.
-                    # This is also not entirely standard.
-                    # The most reliable way: query by source_match_id before. But we removed check_match_exists.
-
-                    # Let's use a placeholder logic for counters, focusing on the SQL.
-                    # Assume if data changed, it's an update. If a new row ID was generated, it's an add.
-                    # This is hard to tell with SQLite's `ON CONFLICT DO UPDATE` and `rowcount`/`lastrowid`.
-                    # The prompt's example `if cursor.rowcount > 0:` for `DO NOTHING` was simple.
-                    # For `DO UPDATE`, it's more nuanced for counters.
-                    # We'll just count it as "processed" for now.
-                    # The problem asks for 'added' and 'updated' counters.
-                    # The simplest approach given the UPSERT:
-                    # If the conflict target (datetime, home, away, source) is new, it's an INSERT.
-                    # If conflict target exists, it's an UPDATE.
-                    # SQLite does this decision itself. `rowcount` is 1 if an operation (insert or update) occurred.
-                    # To truly differentiate, we'd need to know if the conflict occurred.
-                    # A practical approach: assume it's an update if rowcount > 0, unless we can confirm it was a new row.
-                    # This is still tricky. The problem implies these counters should be maintained.
-
-                    # Let's try checking SELECT changes() or total_changes
-                    # If total_changes increased by exactly 1, it's likely an insert.
-                    # If by more (e.g. 2 for an update for some drivers), or 1 for an update that changed values.
-                    # This is too driver/version dependent.
-
-                    # Simplest robust change for now:
-                    # If rowcount is > 0, it means a row was inserted or updated.
-                    # We can't easily distinguish without another query.
-                    # The previous code had an `updated` variable.
-                    # Let's assume if the `ON CONFLICT` part was hit, it's an update.
-                    # If the `INSERT` part was hit, it's an add.
-                    # SQLite doesn't directly tell us this.
-                    # So, let's count any modification as an "update" for simplicity of this step,
-                    # acknowledging the counters might not be perfectly distinct for "added" vs "updated".
-                    # The critical part is the UPSERT and `updated_at`.
-                    updated += 1 # Count any affected row as an update for now.
-                                 # Perfect counters would need more complex logic here.
-
+                if needs_update:
+                    cursor.execute("""
+                        UPDATE matches SET status = ?, home_score = ?, away_score = ?, source_match_id = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE match_id = ?
+                    """, (status_db, hs, a_s, event_id, existing_match_id))
+                    if cursor.rowcount > 0:
+                        updated += 1
+            else:
+                # Perform INSERT
+                cursor.execute("""
+                    INSERT INTO matches (datetime, home_team_id, away_team_id, league_id, status, home_score, away_score, source, source_match_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (match_datetime_iso, ht_id, at_id, l_id, status_db, hs, a_s, source, event_id))
+                if cursor.rowcount > 0:
+                    added += 1
         except Exception as e: print(f"Error TSDb event {event_id}: {e}. Data: {event}")
     print(f"--- Finished TSDb Events. Added {added}, Updated {updated}. ---"); return added,updated
 

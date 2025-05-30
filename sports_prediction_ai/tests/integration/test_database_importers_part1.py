@@ -40,7 +40,7 @@ def test_kaggle_basic_import(in_memory_db, tmp_path):
 
     matches_added, _ = import_kaggle_international_results(conn, csv_filepath)
 
-    assert matches_added == 3 # Expect 3 matches to be added
+    assert matches_added == 2 # Expect 2 matches to be added, as the 3rd is a duplicate by (datetime, teams, source)
 
     cursor = conn.cursor()
 
@@ -96,7 +96,7 @@ def test_kaggle_idempotency(in_memory_db, tmp_path):
     cursor.execute("SELECT COUNT(*) FROM teams")
     teams_count_after_first = cursor.fetchone()[0]
 
-    assert matches_count_after_first == 3
+    assert matches_count_after_first == 2 # Third row is a duplicate by (datetime, teams, source)
     assert leagues_count_after_first == 2
     assert teams_count_after_first == 4
 

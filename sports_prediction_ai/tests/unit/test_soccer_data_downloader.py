@@ -109,7 +109,7 @@ def test_download_csv_file_system_io_error_on_open(tmp_path, mocker, capsys, moc
 
     assert result is False, "Function should return False on IOError during file open"
     captured = capsys.readouterr()
-    assert f"Error writing file {str(expected_filepath)}" in captured.out
+    assert f"IO Error related to file {str(expected_filepath)}" in captured.out # Changed "Error writing file" to "IO Error related to file"
     assert "Mocked IOError: Permission denied" in captured.out
 
 
@@ -129,11 +129,11 @@ def test_download_csv_os_makedirs_fails(tmp_path, mocker, capsys):
     assert result is False, "Function should return False when os.makedirs raises an OSError"
 
     captured = capsys.readouterr()
-    # Check for the error message printed by the SUT's `except OSError` block
-    assert "OS Error related to path" in captured.out
+    # Check for the error message printed by the SUT's `except IOError` block (when filepath is None)
+    assert "OS Error related to directory path" in captured.out
     assert str(download_dir) in captured.out # The path argument to os.makedirs
-    assert TEST_FILENAME in captured.out # The filename argument for context
     assert mock_os_error_message in captured.out # The specific OSError message
+    # TEST_FILENAME is not in this specific error message string from SUT anymore
 
     mock_requests_get.assert_not_called() # Network call should not happen if directory creation fails.
 

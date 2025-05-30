@@ -45,10 +45,13 @@ def download_csv_from_url(url: str, path: str, filename: str):
         print(f"Timeout Error downloading {url}: {e}")
     except requests.exceptions.RequestException as e:
         print(f"An error occurred downloading {url}: {e}")
-    except IOError as e: # Catches errors from open() / write()
-        print(f"Error writing file {filepath}: {e}")
-    except OSError as e: # Catch OS errors, e.g., from os.makedirs if exist_ok=False or permission issues
-        print(f"OS Error related to path {path} or file {filename}: {e}")
+    except IOError as e: # Catches errors from open() / write() and also OSError from os.makedirs if filepath is None
+        if filepath: # Error during open/write
+            print(f"IO Error related to file {filepath}: {e}")
+        else: # Error likely during os.makedirs, filepath is still None
+            print(f"OS Error related to directory path {path}: {e}")
+    # except OSError as e: # This is now effectively covered by IOError (OSError alias)
+    #     print(f"OS Error related to path {path} or file {filename}: {e}")
     return False
 
 if __name__ == '__main__':

@@ -360,14 +360,10 @@ def engineer_form_features(processed_matches_df: pd.DataFrame, historical_matche
                            form_features_df.reset_index(drop=True)], axis=1)
 
     # Fill NaN values in form feature columns with 0
-    # Identify form columns (typically start with 'home_form_' or 'away_form_')
-    form_cols = [col for col in result_df.columns if 'form_' in col and ('_W' in col or '_D' in col or '_L' in col or '_games_played' in col)]
-    if form_cols: # Ensure list is not empty before trying to fill
-        result_df[form_cols] = result_df[form_cols].fillna(0)
-        # Ensure these columns are integer type after fillna, as they represent counts
-        for col in form_cols:
-            if result_df[col].dtype == 'float': # fillna(0) might make it float
-                result_df[col] = result_df[col].astype(int)
+    # Identify newly added form columns
+    form_cols = [col for col in result_df.columns if 'form_' in col and col not in processed_matches_df.columns]
+    if form_cols:
+        result_df[form_cols] = result_df[form_cols].fillna(0).astype(int)
 
     return result_df
 

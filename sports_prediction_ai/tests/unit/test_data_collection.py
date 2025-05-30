@@ -28,9 +28,21 @@ def create_mock_response(mocker, status_code=200, json_data=None, text_data=None
     mock_resp.status_code = status_code
     mock_resp.json = MagicMock(return_value=json_data)
     if text_data is not None: # For non-json error responses
-        mock_resp.text = text_data
+        mock_resp.text = text_data # Used by SUT if e.response.text is accessed
+
     if raise_for_status_error:
-        mock_resp.raise_for_status = MagicMock(side_effect=raise_for_status_error)
+        # If the error to be raised is an HTTPError, ensure it has a 'response' attribute
+        # that points back to our mock_resp, so e.response.status_code can be checked in SUT.
+        if isinstance(raise_for_status_error, requests.exceptions.HTTPError):
+            # Create a new error instance if the provided one is a class type
+            # or to ensure it's not a shared object across parametrized tests if it's an instance.
+            # This also ensures the 'response' attribute is correctly set.
+            current_error_message = str(raise_for_status_error)
+            error_instance = type(raise_for_status_error)(current_error_message) # Re-instantiate
+            error_instance.response = mock_resp # Link mock_resp to error_instance.response
+            mock_resp.raise_for_status = MagicMock(side_effect=error_instance)
+        else: # For other non-HTTPError exceptions
+            mock_resp.raise_for_status = MagicMock(side_effect=raise_for_status_error)
     else:
         mock_resp.raise_for_status = MagicMock() # Does nothing if no error
     return mock_resp
@@ -81,25 +93,41 @@ def test_get_matches_for_date_missing_key(mock_env_football_data_invalid, capsys
     assert "Error: Invalid or missing API key for football-data.org" in captured.out
     mock_requests_get.assert_not_called()
 
-@pytest.mark.parametrize("status_code, error_type, specific_message_part", [
-    (401, requests.exceptions.HTTPError("401 Client Error"), "Invalid or unauthorized API key"),
-    (403, requests.exceptions.HTTPError("403 Client Error"), "Forbidden access"),
-    (404, requests.exceptions.HTTPError("404 Client Error"), "API Error Details"), # Generic for other 4xx/5xx
-    (500, requests.exceptions.HTTPError("500 Server Error"), "API Error Details"),
+@pytest.mark.parametrize("status_code, error_type_str, expected_detailed_msg_content", [
+    (401, "401 Client Error: Unauthorized", "ERROR: Invalid or unauthorized API key for football-data.org (HTTP 401)"),
+    (403, "403 Client Error: Forbidden", "ERROR: Forbidden access to football-data.org API (HTTP 403)"),
+    (404, "404 Client Error: Not Found", "API Error Details: Status Code: 404"), # SUT prints generic for 404
+    (429, "429 Client Error: Too Many Requests", "API Error Details: Status Code: 429"), # SUT prints generic for 429
+    (500, "500 Server Error: Internal Server Error", "API Error Details: Status Code: 500"),
 ])
-def test_get_matches_for_date_http_errors(mocker, mock_env_football_data_valid, capsys, status_code, error_type, specific_message_part):
-    mock_resp = create_mock_response(mocker, status_code=status_code, json_data={}, text_data="Error response", raise_for_status_error=error_type)
+def test_get_matches_for_date_http_errors(mocker, mock_env_football_data_valid, capsys, status_code, error_type_str, expected_detailed_msg_content):
+    http_error_instance = requests.exceptions.HTTPError(error_type_str)
+    mock_response_text = f"Mocked error response for status {status_code}"
+
+    mock_resp = create_mock_response(
+        mocker,
+        status_code=status_code,
+        json_data={},
+        text_data=mock_response_text,
+        raise_for_status_error=http_error_instance
+    )
     mocker.patch("requests.get", return_value=mock_resp)
 
     result = get_matches_for_date("2023-01-01", api_key="VALID_FD_KEY")
 
     assert result == []
-    captured = capsys.readouterr()
-    assert "ERROR: Error fetching data from football-data.org" in captured.out
-    assert specific_message_part in captured.out
+    captured_out = capsys.readouterr().out # Only consider stdout for these checks
+
+    assert f"ERROR: Error fetching data from football-data.org: {error_type_str}" in captured_out
+    assert expected_detailed_msg_content in captured_out
+    if status_code >= 404 : # For generic "API Error Details" cases, also check if response text is included
+        assert mock_response_text in captured_out
+
 
 def test_get_matches_for_date_request_exception(mocker, mock_env_football_data_valid, capsys):
-    mocker.patch("requests.get", side_effect=requests.exceptions.ConnectionError("Connection failed"))
+    # Test for non-HTTPError exceptions like ConnectionError, Timeout
+    connection_error = requests.exceptions.ConnectionError("Connection failed")
+    mocker.patch("requests.get", side_effect=connection_error)
     result = get_matches_for_date("2023-01-01", api_key="VALID_FD_KEY")
     assert result == []
     captured = capsys.readouterr()
@@ -342,21 +370,24 @@ def test_generic_api_function_errors(mocker, capsys, api_function_name, error_ty
     # For simplicity, assume a valid API key is patched in environment or passed if needed.
     # And use dummy arguments.
     args = []
-    kwargs = {}
-    if api_function_name in ["get_historical_matches_for_competition", "get_matches_from_apisports"]:
-        # These functions typically use a module-level API key if not provided.
-        # Let's assume valid keys are in place for this generic test.
-        if api_function_name == "get_historical_matches_for_competition":
-            args = ["PL", 2022] # comp_code, season
-            mocker.patch(f"{module_path}.FOOTBALL_DATA_API_KEY", "VALID_KEY")
-        elif api_function_name == "get_matches_from_apisports":
-            args = ["2023-01-01"] # date_str
-            mocker.patch(f"{module_path}.APISPORTS_API_KEY", "VALID_KEY")
+    kwargs = {} # Use kwargs for API keys to be explicit
+
+    # API key setup for each function type
+    if api_function_name == "get_historical_matches_for_competition":
+        args = ["PL", 2022]
+        kwargs['api_key'] = "VALID_FD_KEY_FOR_GENERIC_TEST"
+        # Patch the SUT's global for this call if it doesn't take api_key arg directly or relies on it for some reason
+        mocker.patch(f"{module_path}.FOOTBALL_DATA_API_KEY", kwargs['api_key'])
+    elif api_function_name == "get_matches_from_apisports":
+        args = ["2023-01-01"]
+        kwargs['api_key'] = "VALID_APISPORTS_KEY_FOR_GENERIC_TEST"
+        mocker.patch(f"{module_path}.APISPORTS_API_KEY", kwargs['api_key'])
     elif "thesportsdb" in api_function_name:
-        mocker.patch(f"{module_path}.THESPORTSDB_API_KEY", "VALID_KEY") # Assume '1' or a test key
+        kwargs['api_key'] = "VALID_TSDB_KEY_FOR_GENERIC_TEST" # SUT uses '1' if env var is missing
+        mocker.patch(f"{module_path}.THESPORTSDB_API_KEY", kwargs['api_key'])
         if api_function_name == "search_league_thesportsdb": args = ["Test League"]
-        elif api_function_name == "get_future_events_thesportsdb": args = ["1234"] # league_id
-        elif api_function_name == "get_event_details_thesportsdb": args = ["evt123"] # event_id
+        elif api_function_name == "get_future_events_thesportsdb": args = ["1234"]
+        elif api_function_name == "get_event_details_thesportsdb": args = ["evt123"]
 
     result = func_to_test(*args, **kwargs)
 
@@ -366,11 +397,28 @@ def test_generic_api_function_errors(mocker, capsys, api_function_name, error_ty
         assert result == []
 
     captured = capsys.readouterr()
-    assert error_message_snippet in captured.out
-    if not isinstance(error_type, ValueError): # For requests exceptions, the original error is often in the message
-         assert str(error_type) in captured.out or type(error_type).__name__ in captured.out
-    else: # For JSON decode value error
-        assert "JSON decode error" in captured.out
+
+    # Generic check for the error type being part of the message
+    # For example, if error_type is HTTPError("Mocked..."), then "HTTPError" should be in the output.
+    # If error_type is ValueError("JSON..."), then "ValueError" should be in the output.
+    # The SUT prints the exception string `e`, which includes the type and message.
+    assert str(error_type) in captured.out
+
+    # Check for the specific snippet based on error type and function
+    if isinstance(error_type, ValueError):
+        assert "Error decoding JSON response" in captured.out.lower() # Check for consistent part, case-insensitive
+    else: # Network/HTTP errors - check for common parts and API specific name
+        assert "error" in captured.out.lower() # All error messages should contain "error"
+        assert "fetching data" in captured.out.lower() # All error messages should contain "fetching data"
+
+        # Check for API specific name in the error message
+        if api_function_name == "get_historical_matches_for_competition":
+             assert "football-data.org" in captured.out.lower()
+        elif api_function_name == "get_matches_from_apisports":
+             assert "api-sports" in captured.out.lower() # SUT uses "API-SPORTS" but check lower for robustness
+        elif "thesportsdb" in api_function_name:
+             assert "thesportsdb" in captured.out.lower()
+
 
 # Note: SSL Error specific to football-data.org is already tested in test_get_matches_for_date_http_errors
 # if we add a parameter for it. The current test_get_matches_for_date handles it via generic RequestException.

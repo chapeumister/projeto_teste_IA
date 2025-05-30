@@ -6,22 +6,22 @@ import os
 import tempfile
 import json
 import shutil
-import atexit
+# import atexit # No longer needed as global setup is removed
 
 # --- Global Setup for Dummy Kaggle Config ---
-# This code runs when this test module is first imported by pytest.
-TEMP_KAGGLE_CONFIG_DIR = tempfile.mkdtemp(prefix="pytest-kaggle-cfg-")
-os.environ["KAGGLE_CONFIG_DIR"] = TEMP_KAGGLE_CONFIG_DIR
-dummy_kaggle_json_path = os.path.join(TEMP_KAGGLE_CONFIG_DIR, "kaggle.json")
-with open(dummy_kaggle_json_path, 'w') as f:
-    json.dump({"username": "testuser", "key": "testkey"}, f)
-print(f"INFO: Dummy kaggle config created at {TEMP_KAGGLE_CONFIG_DIR} for module {__name__}")
+# This code is removed as conftest.py's session-scoped autouse fixture `setup_dummy_kaggle_config` handles it.
+# TEMP_KAGGLE_CONFIG_DIR = tempfile.mkdtemp(prefix="pytest-kaggle-cfg-")
+# os.environ["KAGGLE_CONFIG_DIR"] = TEMP_KAGGLE_CONFIG_DIR
+# dummy_kaggle_json_path = os.path.join(TEMP_KAGGLE_CONFIG_DIR, "kaggle.json")
+# with open(dummy_kaggle_json_path, 'w') as f:
+#     json.dump({"username": "testuser", "key": "testkey"}, f)
+# print(f"INFO: Dummy kaggle config created at {TEMP_KAGGLE_CONFIG_DIR} for module {__name__}")
 
-def cleanup_dummy_kaggle_config():
-    if os.path.exists(TEMP_KAGGLE_CONFIG_DIR):
-        shutil.rmtree(TEMP_KAGGLE_CONFIG_DIR, ignore_errors=True)
-        print(f"INFO: Cleaned up dummy kaggle config dir {TEMP_KAGGLE_CONFIG_DIR}")
-atexit.register(cleanup_dummy_kaggle_config)
+# def cleanup_dummy_kaggle_config():
+#     if os.path.exists(TEMP_KAGGLE_CONFIG_DIR):
+#         shutil.rmtree(TEMP_KAGGLE_CONFIG_DIR, ignore_errors=True)
+#         print(f"INFO: Cleaned up dummy kaggle config dir {TEMP_KAGGLE_CONFIG_DIR}")
+# atexit.register(cleanup_dummy_kaggle_config)
 # --- End Global Setup ---
 
 import pytest
@@ -36,7 +36,7 @@ from sports_prediction_ai.src.kaggle_downloader import download_kaggle_dataset
 TEST_DATASET_SLUG = "testuser/testdataset"
 TEST_DATASET_NAME = "testdataset" # from TEST_DATASET_SLUG.split('/')[-1]
 
-# The fixture setup_dummy_kaggle_config is no longer needed as setup is done globally above.
+# The conftest.py `setup_dummy_kaggle_config` fixture (session-scoped, autouse) handles Kaggle config.
 
 def test_download_dataset_success(tmp_path, mocker):
     """Test successful download and unzip of a dataset."""

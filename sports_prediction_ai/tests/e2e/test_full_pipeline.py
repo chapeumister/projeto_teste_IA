@@ -206,7 +206,7 @@ def test_full_pipeline_workflow(in_memory_db, mocker, tmp_path, mock_downloaders
     epl_id_tsdb = "4328" # Assuming this is found or known
     future_events_tsdb = mock_data_collection_apis['tsdb_future_events'](epl_id_tsdb)
     if future_events_tsdb:
-        added, updated = database_importer.import_thesportsdb_events(db_conn, future_events_tsdb, default_league_name_if_missing="English Premier League")
+        added, updated = database_importer.import_thesportsdb_events(db_conn, future_events_tsdb, default_league_name="English Premier League")
         tsdb_matches_added_count += added
         tsdb_matches_updated_count += updated
 
@@ -214,10 +214,12 @@ def test_full_pipeline_workflow(in_memory_db, mocker, tmp_path, mock_downloaders
     if future_events_tsdb and future_events_tsdb[0].get('idEvent'):
         event_detail = mock_data_collection_apis['tsdb_event_details'](future_events_tsdb[0]['idEvent'])
         if event_detail:
-            added, updated = database_importer.import_thesportsdb_events(db_conn, [event_detail], default_league_name_if_missing="English Premier League")
+            added, updated = database_importer.import_thesportsdb_events(db_conn, [event_detail], default_league_name="English Premier League")
             # Avoid double counting if it was already added, just count potential update
-            if updated > 0 and added == 0 : tsdb_matches_updated_count += updated
-            elif added > 0 : tsdb_matches_added_count += added # If it was somehow not added before
+            if updated > 0 and added == 0:
+                tsdb_matches_updated_count += updated
+            elif added > 0:
+                tsdb_matches_added_count += added # If it was somehow not added before
 
     db_conn.commit() # Commit any pending TSDb transactions
 

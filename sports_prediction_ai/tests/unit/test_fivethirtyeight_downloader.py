@@ -153,9 +153,7 @@ def test_path_exists_not_git_repo(tmp_path, mock_subprocess_run, mock_os_ops, ca
 
 @pytest.mark.parametrize("exception_raised, expected_message_part", [
     (FileNotFoundError("git command not found"), "Error: 'git' command not found."),
-    # Note: fivethirtyeight_downloader.py's clone_or_update_repo does not explicitly catch TimeoutExpired.
-    # It would be caught by the generic `except Exception`.
-    (subprocess.TimeoutExpired("cmd", 120), "An unexpected error occurred: cmd"), # Check actual error message
+    (subprocess.TimeoutExpired("cmd", 120), "An unexpected error occurred: Command 'cmd' timed out after 120 seconds"),
     (Exception("Some other unexpected error"), "An unexpected error occurred: Some other unexpected error")
 ])
 def test_clone_or_update_exceptions(tmp_path, mock_subprocess_run, mock_os_ops, capsys, exception_raised, expected_message_part):
