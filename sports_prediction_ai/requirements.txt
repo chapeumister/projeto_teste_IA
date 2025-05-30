@@ -6,3 +6,8 @@ joblib
 matplotlib
 seaborn
 numpy
+PyYAML
+kaggle
+pytest
+pytest-mock
+coverage
