@@ -10,8 +10,11 @@ from datetime import datetime, timedelta # Imported timedelta
 # For now, we'll use a placeholder.
 FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY", "YOUR_API_TOKEN")
 APISPORTS_API_KEY = os.getenv("APISPORTS_API_KEY") # New API key
+THESPORTSDB_API_KEY = os.getenv("THESPORTSDB_API_KEY", "1") # Default to "1" (free key)
 FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4/"
 APISPORTS_BASE_URL = "https://v3.football.api-sports.io/" # New base URL
+THESPORTSDB_BASE_URL = "https://www.thesportsdb.com/api/v1/json/"
+
 
 def get_matches_for_date(date_str: str, api_key: str = FOOTBALL_DATA_API_KEY):
     """
@@ -163,6 +166,50 @@ if __name__ == "__main__":
     # else:
     #     print("No matches fetched. Ensure your FOOTBALL_DATA_API_KEY environment variable is set correctly.")
 
+
+    # --- Historical Data Fetching Example ---
+    print("\n--- Historical Match Data Fetching (football-data.org) ---")
+    print("Note: This may be rate-limited or require a paid API plan for extensive use.")
+
+    historical_competitions_seasons = [
+        ('PL', 2022),  # English Premier League
+        ('BL1', 2022), # German Bundesliga 1
+        ('SA', 2022),  # Italian Serie A
+        ('PD', 2022),  # Spanish Primera Division (La Liga)
+        # ('FL1', 2022), # French Ligue 1 (uncomment to add)
+        # ('CL', 2022),  # UEFA Champions League (uncomment to add)
+    ]
+
+    # Define base path for saving historical data
+    # Assuming script is in sports_prediction_ai/src/
+    # Data will be in sports_prediction_ai/data/football_data_org_historical/
+    try:
+        script_dir_path = os.path.dirname(os.path.abspath(__file__))
+        project_root_path = os.path.dirname(script_dir_path)
+        historical_data_base_path = os.path.join(project_root_path, 'data', 'football_data_org_historical')
+    except NameError: # Fallback for environments where __file__ might not be defined
+        print("Warning: __file__ not defined, using current working directory for historical data path relative calculations.")
+        historical_data_base_path = os.path.join(os.getcwd(), 'sports_prediction_ai', 'data', 'football_data_org_historical')
+
+    if FOOTBALL_DATA_API_KEY == "YOUR_API_TOKEN" or not FOOTBALL_DATA_API_KEY:
+        print("Skipping historical data fetching as FOOTBALL_DATA_API_KEY is placeholder or not set.")
+    else:
+        for comp_code, season_year in historical_competitions_seasons:
+            print(f"\nFetching historical data for {comp_code}, Season {season_year}...")
+            matches_historical = get_historical_matches_for_competition(comp_code, season_year)
+
+            if matches_historical:
+                print(f"Found {len(matches_historical)} matches for {comp_code}, Season {season_year}.")
+                # Save the data
+                save_data_to_json(
+                    data=matches_historical,
+                    base_path=historical_data_base_path,
+                    competition_code=comp_code,
+                    season=season_year
+                )
+            else:
+                print(f"No historical matches found or error fetching for {comp_code}, Season {season_year}.")
+
     print(f"\nFetching matches for today using API-SPORTS: {today_str}")
     apisports_matches = get_matches_from_apisports(today_str)
 
@@ -296,3 +343,213 @@ def get_matches_from_sportmonks(date_str: str, api_key: str = None):
     # 4. Data parsing logic to transform SportMonks API response into a common format (similar to other get_matches_* functions).
     # 5. Error handling.
     return []
+
+
+# --- Historical Data Fetching for football-data.org ---
+# Note: Accessing extensive historical data may be subject to rate limits or require
+# a specific plan on football-data.org. Always consult their API documentation.
+
+def get_historical_matches_for_competition(competition_code: str, season: int, api_key: str = FOOTBALL_DATA_API_KEY):
+    """
+    Fetches all matches for a specific competition and season from football-data.org.
+
+    Args:
+        competition_code (str): The competition code (e.g., 'PL', 'BL1').
+        season (int): The starting year of the season (e.g., 2022 for 2022-2023 season).
+        api_key (str): The API key for football-data.org.
+
+    Returns:
+        list: A list of match objects, or an empty list if an error occurs.
+              Note: This function currently assumes all matches for a season are returned in a single API call.
+              For very large datasets or APIs with strict pagination on historical data,
+              pagination handling would need to be added.
+    """
+    if not api_key or api_key == "YOUR_API_TOKEN":
+        print(f"Error: Invalid or missing API key for football-data.org. Cannot fetch historical data for {competition_code} season {season}.")
+        return []
+
+    headers = {"X-Auth-Token": api_key}
+    api_url = f"{FOOTBALL_DATA_BASE_URL}competitions/{competition_code}/matches?season={season}"
+
+    print(f"DEBUG: data_collection.py - get_historical_matches_for_competition - Requesting URL: {api_url} with API Key: {api_key[:4]}...{api_key[-4:] if len(api_key) > 8 else ''}")
+
+    try:
+        response = requests.get(api_url, headers=headers, timeout=60) # Increased timeout for potentially larger data
+        response.raise_for_status()
+        data = response.json()
+
+        matches = data.get("matches", [])
+        if not matches and data.get("count", 0) == 0:
+            print(f"INFO: No matches found for {competition_code} season {season}. API returned count 0 or no 'matches' array.")
+        elif not matches and data.get("count", 0) > 0:
+             print(f"WARNING: API reported {data.get('count')} matches for {competition_code} season {season}, but 'matches' array is empty. Check API response.")
+
+        # football-data.org v4 for this endpoint usually returns all matches without explicit pagination controls needed by the client.
+        # If pagination were required, logic to check 'meta' or 'resultSet' for 'next' page links and loop would go here.
+        return matches
+    except requests.exceptions.SSLError as e:
+        print(f"ERROR: An SSL error occurred while contacting football-data.org for historical data ({competition_code} {season}): {e}")
+        return []
+    except requests.exceptions.ReadTimeout as e:
+        print(f"ERROR: Read timeout from football-data.org for historical data ({competition_code} {season}): {e}. The server did not send any data in the allotted amount of time.")
+        return []
+    except requests.exceptions.RequestException as e:
+        print(f"ERROR: Error fetching historical data for {competition_code} season {season} from football-data.org: {e}")
+        if e.response is not None:
+            if e.response.status_code == 401:
+                print(f"ERROR: Invalid or unauthorized API key for football-data.org (HTTP 401).")
+            elif e.response.status_code == 403:
+                print(f"ERROR: Forbidden access (HTTP 403). Your API key may not have permissions for this competition/season or has been suspended.")
+            elif e.response.status_code == 404:
+                 print(f"ERROR: Competition or season not found (HTTP 404) for {competition_code} season {season}.")
+            elif e.response.status_code == 429: # Rate limit
+                print(f"ERROR: Rate limit exceeded (HTTP 429) for football-data.org. Please wait before trying again.")
+            else:
+                print(f"API Error Details: Status Code: {e.response.status_code}, Response Text: {e.response.text}")
+        return []
+    except ValueError as e: # Handles JSON decoding errors
+        print(f"Error decoding JSON response for {competition_code} season {season}: {e}")
+        return []
+
+def save_data_to_json(data, base_path, competition_code, season):
+    """
+    Saves data to a JSON file in a structured directory.
+    Example path: base_path/COMPETITION_CODE/SEASON/matches.json
+    """
+    try:
+        target_dir = os.path.join(base_path, competition_code, str(season))
+        os.makedirs(target_dir, exist_ok=True)
+        filepath = os.path.join(target_dir, "matches.json")
+
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=4)
+        print(f"Successfully saved data to {filepath}")
+        return True
+    except IOError as e:
+        print(f"Error saving data to {filepath}: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred during save_data_to_json: {e}")
+    return False
+
+
+# --- TheSportsDB API Functions ---
+# Note: TheSportsDB free tier (API Key "1") is limited and may not return all data,
+# or data might be heavily cached. A Patreon key is required for more comprehensive access.
+
+def search_league_thesportsdb(league_name_query: str, api_key: str = THESPORTSDB_API_KEY) -> list:
+    """
+    Searches for a league by name using TheSportsDB API.
+    URL: {THESPORTSDB_BASE_URL}{api_key}/searchleagues.php?l={league_name_query}
+    (Note: The API documentation suggests ?s={sport_name} for all leagues in a sport,
+     or ?c={country_name}&s={sport_name} for specific country leagues.
+     The endpoint /searchleagues.php?l={league_name_query} is less documented for general use but might work for exact names.)
+     Using ?l={league_name_query} which is more direct if the name is known.
+     If this doesn't work well, consider search_all_leagues.php?s={sport_query} (e.g., sport_query="Soccer")
+
+    Args:
+        league_name_query (str): The name of the league to search for (e.g., "English Premier League").
+        api_key (str): The API key for TheSportsDB.
+
+    Returns:
+        list: A list of league objects found, or an empty list if an error occurs or no leagues are found.
+    """
+    if not league_name_query:
+        print("Error: League name query cannot be empty for search_league_thesportsdb.")
+        return []
+
+    # TheSportsDB search can be tricky. The endpoint searchleagues.php expects a league name, but also often a sport.
+    # A more reliable way if sport is known is search_all_leagues.php?s={sport_name} then filter by name.
+    # However, sticking to the specified direct league name query:
+    api_url = f"{THESPORTSDB_BASE_URL}{api_key}/searchleagues.php?l={requests.utils.quote(league_name_query)}"
+    # Alternative for all soccer leagues: f"{THESPORTSDB_BASE_URL}{api_key}/search_all_leagues.php?s=Soccer"
+
+    print(f"DEBUG: data_collection.py - search_league_thesportsdb - Requesting URL: {api_url}")
+
+    try:
+        response = requests.get(api_url, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+
+        # The key for leagues might be 'countrys' (typo in API) or 'leagues'
+        leagues = data.get("leagues", data.get("countrys")) # 'countrys' is often used for soccer leagues list
+        if leagues is None: # If neither key is found or is explicitly null
+            print(f"INFO: No 'leagues' or 'countrys' key found in response for '{league_name_query}', or it was null.")
+            return []
+        return leagues
+    except requests.exceptions.RequestException as e:
+        print(f"ERROR: Error fetching data from TheSportsDB (search_league): {e}")
+        return []
+    except ValueError as e: # Handles JSON decoding errors
+        print(f"Error decoding JSON response from TheSportsDB (search_league): {e}")
+        return []
+
+def get_future_events_thesportsdb(league_id: str, api_key: str = THESPORTSDB_API_KEY) -> list:
+    """
+    Fetches future events (matches) for a specific league ID from TheSportsDB API.
+
+    Args:
+        league_id (str): The league ID from TheSportsDB (e.g., "4328" for English Premier League).
+        api_key (str): The API key for TheSportsDB.
+
+    Returns:
+        list: A list of event objects, or an empty list if an error occurs or no events are found.
+    """
+    if not league_id:
+        print("Error: league_id must be provided for get_future_events_thesportsdb.")
+        return []
+
+    api_url = f"{THESPORTSDB_BASE_URL}{api_key}/eventsnextleague.php?id={league_id}"
+    print(f"DEBUG: data_collection.py - get_future_events_thesportsdb - Requesting URL: {api_url}")
+
+    try:
+        response = requests.get(api_url, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        events = data.get("events") # API returns "events": null if no upcoming events
+        if events is None:
+            print(f"INFO: No future events found for league ID {league_id} (API returned null for 'events').")
+            return []
+        return events
+    except requests.exceptions.RequestException as e:
+        print(f"ERROR: Error fetching data from TheSportsDB (future_events for league {league_id}): {e}")
+        return []
+    except ValueError as e: # Handles JSON decoding errors
+        print(f"Error decoding JSON response from TheSportsDB (future_events for league {league_id}): {e}")
+        return []
+
+def get_event_details_thesportsdb(event_id: str, api_key: str = THESPORTSDB_API_KEY) -> dict | None:
+    """
+    Fetches details for a specific event ID from TheSportsDB API.
+    Useful for getting live scores, final results, and detailed stats.
+
+    Args:
+        event_id (str): The event ID from TheSportsDB.
+        api_key (str): The API key for TheSportsDB.
+
+    Returns:
+        dict: The event object (usually a list with one event, so returns the first element),
+              or None if an error occurs or the event is not found.
+    """
+    if not event_id:
+        print("Error: event_id must be provided for get_event_details_thesportsdb.")
+        return None
+
+    api_url = f"{THESPORTSDB_BASE_URL}{api_key}/lookupevent.php?id={event_id}"
+    print(f"DEBUG: data_collection.py - get_event_details_thesportsdb - Requesting URL: {api_url}")
+
+    try:
+        response = requests.get(api_url, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        events = data.get("events") # API returns "events": null if event not found
+        if events and len(events) > 0:
+            return events[0] # Return the first event object
+        else:
+            print(f"INFO: No event details found for event ID {event_id} (API returned null or empty list for 'events').")
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"ERROR: Error fetching data from TheSportsDB (event_details for event {event_id}): {e}")
+        return None
+    except ValueError as e: # Handles JSON decoding errors
+        print(f"Error decoding JSON response from TheSportsDB (event_details for event {event_id}): {e}")
+        return None

@@ -1,5 +1,27 @@
 # src/data_preprocessing.py
 import pandas as pd
+import sqlite3
+import os
+from datetime import datetime
+
+# --- Database Path ---
+try:
+    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'sports_data.db')
+except NameError: # Fallback for environments where __file__ might not be defined
+    print("Warning: __file__ not defined, using current working directory for DB_PATH relative calculations.")
+    DB_PATH = os.path.join(os.getcwd(), 'sports_prediction_ai', 'data', 'sports_data.db')
+
+def get_db_connection():
+    """Establishes and returns a connection to the SQLite database."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        # conn.execute("PRAGMA foreign_keys = ON;") # Foreign keys already handled by database_importer
+        print(f"Successfully connected to database at {DB_PATH}")
+    except sqlite3.Error as e:
+        print(f"Error connecting to database: {e}")
+        raise
+    return conn
 
 def preprocess_match_data(matches_raw_data: list):
     """
@@ -336,6 +358,13 @@ def engineer_form_features(processed_matches_df: pd.DataFrame, historical_matche
     # Concatenate with the original DataFrame
     result_df = pd.concat([processed_matches_df.reset_index(drop=True), 
                            form_features_df.reset_index(drop=True)], axis=1)
+
+    # Fill NaN values in form feature columns with 0
+    # Identify newly added form columns
+    form_cols = [col for col in result_df.columns if 'form_' in col and col not in processed_matches_df.columns]
+    if form_cols:
+        result_df[form_cols] = result_df[form_cols].fillna(0).astype(int)
+
     return result_df
 
 
@@ -492,3 +521,210 @@ if __name__ == '__main__':
     else:
         print("\nNo data processed initially, skipping form feature engineering examples.")
 
+
+# --- New DB-centric Data Fetching and Preprocessing ---
+
+def get_ml_ready_dataframe_from_db(conn, league_names: list = None, date_from: str = None, date_to: str = None) -> pd.DataFrame:
+    """
+    Fetches and preprocesses match data from the SQLite database to create an ML-ready DataFrame.
+
+    Args:
+        conn: Active SQLite database connection.
+        league_names (list, optional): List of league names to filter by.
+        date_from (str, optional): Start date for filtering matches (YYYY-MM-DD).
+        date_to (str, optional): End date for filtering matches (YYYY-MM-DD).
+
+    Returns:
+        pd.DataFrame: A DataFrame ready for machine learning, including engineered features.
+    """
+    print("\n--- Starting ML-Ready DataFrame Creation from DB ---")
+
+    query = """
+    SELECT
+        m.match_id,
+        m.datetime,
+        m.home_team_id,
+        ht.name as home_team_name,
+        m.away_team_id,
+        at.name as away_team_name,
+        l.league_id AS league_id, -- Ensuring league_id comes from leagues table and is named 'league_id'
+        l.name as league_name,
+        m.home_score,
+        m.away_score,
+        m.status,
+        m.source_match_id,
+        m.source
+    FROM matches m
+    JOIN leagues l ON m.league_id = l.league_id
+    JOIN teams ht ON m.home_team_id = ht.team_id
+    JOIN teams at ON m.away_team_id = at.team_id
+    WHERE 1=1
+    """
+    params = []
+
+    if league_names and isinstance(league_names, list) and len(league_names) > 0:
+        placeholders = ','.join('?' for _ in league_names)
+        query += f" AND l.name IN ({placeholders})"
+        params.extend(league_names)
+
+    if date_from:
+        query += " AND DATE(m.datetime) >= DATE(?)" # Ensure datetime is compared as date
+        params.append(date_from)
+
+    if date_to:
+        query += " AND DATE(m.datetime) <= DATE(?)"
+        params.append(date_to)
+
+    query += " ORDER BY m.datetime ASC" # Important for consistent processing if any time-sensitive features are added later
+
+    print(f"Executing query for matches with params: {params}")
+    try:
+        matches_df = pd.read_sql_query(query, conn, params=params)
+    except pd.io.sql.DatabaseError as e:
+        print(f"Database query error: {e}")
+        print(f"Query: {query}")
+        print(f"Params: {params}")
+        return pd.DataFrame() # Return empty if query fails
+
+    if matches_df.empty:
+        print("No matches found for the given criteria.")
+        return pd.DataFrame()
+
+    print(f"Fetched {len(matches_df)} matches from the database.")
+
+    # Convert datetime column to pandas datetime objects
+    matches_df['datetime'] = pd.to_datetime(matches_df['datetime'])
+    # For form feature engineering, we need a column named 'utcDate'.
+    # We'll use the 'datetime' column from DB and rename it for compatibility.
+    matches_df.rename(columns={'datetime': 'utcDate'}, inplace=True)
+
+
+    # --- Feature Engineering: Form ---
+    print("Fetching historical matches for form calculation...")
+    # Query all finished matches from the DB to serve as historical data
+    # This is a simplified approach; for very large datasets, more optimized queries might be needed.
+    historical_query = """
+    SELECT
+        m.match_id,
+        m.datetime as utcDate, -- Rename for compatibility with get_team_form_features
+        m.home_team_id,
+        m.away_team_id,
+        m.home_score as home_team_score, -- Rename for compatibility
+        m.away_score as away_team_score  -- Rename for compatibility
+    FROM matches m
+    WHERE m.status = 'FINISHED' AND m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+    ORDER BY m.datetime DESC
+    """ # Order by desc is good for get_team_form_features if it takes .head()
+
+    historical_matches_df_from_db = pd.read_sql_query(historical_query, conn)
+
+    if historical_matches_df_from_db.empty:
+        print("Warning: No historical match data found in the database. Form features cannot be calculated.")
+        # Add empty form columns if historical data is missing to maintain schema
+        prefixes = ['home_form_overall_', 'home_form_home_', 'home_form_away_',
+                    'away_form_overall_', 'away_form_home_', 'away_form_away_']
+        suffixes = ['W', 'D', 'L', 'games_played']
+        for p in prefixes:
+            for s in suffixes:
+                matches_df[f'{p}{s}'] = 0
+    else:
+        print(f"Fetched {len(historical_matches_df_from_db)} historical matches for form calculation.")
+        # Ensure 'utcDate' is datetime for historical data as well
+        historical_matches_df_from_db['utcDate'] = pd.to_datetime(historical_matches_df_from_db['utcDate'])
+
+        # Engineer form features
+        # The `engineer_form_features` function expects `utcDate`, `home_team_score`, `away_team_score`
+        # in the historical_matches_df. Our query already named them appropriately.
+        print("Engineering form features...")
+        matches_df = engineer_form_features(matches_df, historical_matches_df_from_db, num_games=5)
+
+    # --- Create Target Variable: match_outcome ---
+    # 1 for home win, 0 for draw, -1 for away win
+    # Only for 'FINISHED' matches with valid scores
+    def calculate_outcome(row):
+        if row['status'] == 'FINISHED' and pd.notna(row['home_score']) and pd.notna(row['away_score']):
+            if row['home_score'] > row['away_score']:
+                return 1  # Home win
+            elif row['home_score'] < row['away_score']:
+                return -1 # Away win
+            else:
+                return 0  # Draw
+        return None  # For non-finished or matches with missing scores
+
+    matches_df['match_outcome'] = matches_df.apply(calculate_outcome, axis=1)
+
+    print("ML-ready DataFrame created with basic features and form.")
+
+    # TODO: Add Odds and Stats feature integration here if needed later.
+    # TODO: Select final set of features for ML. For now, returning all engineered features.
+
+    return matches_df
+
+
+if __name__ == '__main__':
+    # ... (previous example usage of preprocess_match_data and form features) ...
+    # Keep the old examples if they are useful for unit testing individual functions.
+    # Add new example for get_ml_ready_dataframe_from_db:
+
+    print("\n\n--- Testing get_ml_ready_dataframe_from_db ---")
+    conn = None
+    try:
+        # Create a dummy database for testing if DB_PATH doesn't exist or is empty
+        # This is primarily for making the script runnable in isolation if the main DB isn't populated.
+        # In a real workflow, the DB would already exist and be populated.
+        if not os.path.exists(DB_PATH) or os.path.getsize(DB_PATH) == 0:
+            print(f"Test DB at {DB_PATH} is missing or empty. Creating a dummy DB for this test run.")
+            conn_setup = sqlite3.connect(DB_PATH)
+            cursor_setup = conn_setup.cursor()
+            # Create schema (simplified version of database_setup.py for this test)
+            cursor_setup.execute("CREATE TABLE IF NOT EXISTS leagues (league_id INTEGER PRIMARY KEY, name TEXT UNIQUE, sport TEXT, country TEXT, source TEXT)")
+            cursor_setup.execute("CREATE TABLE IF NOT EXISTS teams (team_id INTEGER PRIMARY KEY, name TEXT UNIQUE, short_name TEXT, country TEXT, league_id INTEGER, source TEXT, FOREIGN KEY (league_id) REFERENCES leagues(league_id))")
+            cursor_setup.execute("CREATE TABLE IF NOT EXISTS matches (match_id INTEGER PRIMARY KEY, datetime TEXT, home_team_id INTEGER, away_team_id INTEGER, league_id INTEGER, status TEXT, home_score INTEGER, away_score INTEGER, source TEXT, source_match_id TEXT, FOREIGN KEY (home_team_id) REFERENCES teams(team_id), FOREIGN KEY (away_team_id) REFERENCES teams(team_id), FOREIGN KEY (league_id) REFERENCES leagues(league_id))")
+
+            # Insert some dummy data
+            cursor_setup.execute("INSERT OR IGNORE INTO leagues (league_id, name, sport, country) VALUES (1, 'Premier League', 'Football', 'England')")
+            cursor_setup.execute("INSERT OR IGNORE INTO teams (team_id, name, league_id) VALUES (100, 'Arsenal', 1), (101, 'Chelsea', 1), (102, 'Liverpool', 1)")
+
+            # Dummy historical matches for form calculation
+            dummy_matches_for_form = [
+                (datetime(2022, 12, 1, 15, 0, 0).strftime('%Y-%m-%d %H:%M:%S'), 100, 101, 1, 'FINISHED', 2, 1, 'Test'), # Arsenal beat Chelsea
+                (datetime(2022, 12, 5, 15, 0, 0).strftime('%Y-%m-%d %H:%M:%S'), 101, 102, 1, 'FINISHED', 0, 0, 'Test'), # Chelsea draw Liverpool
+                (datetime(2022, 12, 10, 15, 0, 0).strftime('%Y-%m-%d %H:%M:%S'), 102, 100, 1, 'FINISHED', 1, 3, 'Test'), # Liverpool lose to Arsenal
+            ]
+            for m_data in dummy_matches_for_form: cursor_setup.execute("INSERT INTO matches (datetime, home_team_id, away_team_id, league_id, status, home_score, away_score, source) VALUES (?,?,?,?,?,?,?,?)", m_data)
+
+            # Dummy matches to be processed (the ones we want to predict for or analyze)
+            dummy_matches_to_process = [
+                (datetime(2023, 1, 1, 15, 0, 0).strftime('%Y-%m-%d %H:%M:%S'), 100, 101, 1, 'SCHEDULED', None, None, 'TestFuture'), # Arsenal vs Chelsea (future)
+                (datetime(2023, 1, 2, 15, 0, 0).strftime('%Y-%m-%d %H:%M:%S'), 101, 102, 1, 'FINISHED', 2, 2, 'TestFuture'),   # Chelsea vs Liverpool (recent actual)
+            ]
+            for m_data in dummy_matches_to_process: cursor_setup.execute("INSERT INTO matches (datetime, home_team_id, away_team_id, league_id, status, home_score, away_score, source) VALUES (?,?,?,?,?,?,?,?)", m_data)
+
+            conn_setup.commit()
+            conn_setup.close()
+            print("Dummy DB created and populated for testing.")
+
+        conn = get_db_connection()
+
+        # Example: Get data for 'Premier League' within a specific date range
+        ml_df = get_ml_ready_dataframe_from_db(conn,
+                                               league_names=['Premier League'],
+                                               date_from='2023-01-01',
+                                               date_to='2023-01-31')
+
+        if not ml_df.empty:
+            print("\nML-Ready DataFrame Info:")
+            ml_df.info()
+            print("\nML-Ready DataFrame Head:")
+            # Print all columns to see form features
+            pd.set_option('display.max_columns', None)
+            print(ml_df.head())
+        else:
+            print("No ML-ready data generated from DB.")
+
+    except Exception as e:
+        print(f"An error occurred in the main example: {e}")
+    finally:
+        if conn:
+            conn.close()
+            print("Database connection closed.")
